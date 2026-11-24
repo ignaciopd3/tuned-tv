@@ -1,7 +1,7 @@
-From 623ab59890e871c913d8069c2c511540310e8ae4 Mon Sep 17 00:00:00 2001
+From 2194c7d45dcb5e579f46e3bca103ff2be5c3a549 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 19:13:31 +0100
-Subject: [PATCH 16/23] Casa: a role sent as null is forgotten
+Subject: [PATCH 16/24] Casa: a role sent as null is forgotten
 
 For a device that broke or was removed: the PC sends "gas": null and Casa
 drops it, so it stops trying to reach it and warning that it is down.

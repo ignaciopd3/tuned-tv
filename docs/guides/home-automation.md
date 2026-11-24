@@ -89,5 +89,6 @@ Also:
 
 - Smart Life / Tuya only for now. **Home Assistant support is on the way.**
 - Alerts need the TV to be on.
-- Casa's on-screen texts are in Spanish for now.
+- Casa speaks English and Spanish and follows the TV's language; on a TV in another language it shows English.
+  Translations are welcome (see [CONTRIBUTING.md](../../CONTRIBUTING.md#translations)).
 - Tested on a TCL with Google TV and a Fire TV Stick 4K Max.

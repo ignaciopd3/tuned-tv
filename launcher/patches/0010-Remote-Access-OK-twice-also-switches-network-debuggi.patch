@@ -1,7 +1,7 @@
-From 27fb6ac3ad02ece05f8d682c11659268557dbb08 Mon Sep 17 00:00:00 2001
+From 52311400a7b382cd08db28d088f4f50a1164799a Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 23:37:07 +0100
-Subject: [PATCH 10/23] Remote Access: OK twice also switches network debugging
+Subject: [PATCH 10/24] Remote Access: OK twice also switches network debugging
  on
 
 With WRITE_SECURE_SETTINGS already granted for the off button, the same row

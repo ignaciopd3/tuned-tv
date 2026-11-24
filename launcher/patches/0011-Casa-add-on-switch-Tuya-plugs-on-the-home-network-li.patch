@@ -1,7 +1,7 @@
-From 483288357eef6418d6d5ab19ce932c36bae54626 Mon Sep 17 00:00:00 2001
+From 9a47636d92a3966ad5c0e0f9d33a35b7a4ee007a Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 10:43:42 +0100
-Subject: [PATCH 11/23] Casa add-on: switch Tuya plugs on the home network
+Subject: [PATCH 11/24] Casa add-on: switch Tuya plugs on the home network
  (light, heater)
 
 Tuya LAN protocol 3.3 and 3.5 ported from tinytuya and checked byte for byte

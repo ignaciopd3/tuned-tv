@@ -1,7 +1,7 @@
-From 5bb57803c28003338380a2cdb31588967a892c8f Mon Sep 17 00:00:00 2001
+From 25b3049026ceb3befacfebe01f94d727cf258301 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 16:57:13 +0100
-Subject: [PATCH 04/23] Header and top-bar capsules (header_capsule,
+Subject: [PATCH 04/24] Header and top-bar capsules (header_capsule,
  top_bar_capsule)
 
 header_capsule puts dark glass behind the greeting, clock, date and weather,

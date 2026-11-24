@@ -1,7 +1,7 @@
-From da1697b25381aa314dfd0ab0960e1198a9365652 Mon Sep 17 00:00:00 2001
+From 09789e76c316612691e4627ba57bed4a3b99044a Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Tue, 24 Nov 2026 00:32:37 +0100
-Subject: [PATCH 21/23] casa_row: Down goes back to the dock tile Up came from,
+Subject: [PATCH 21/24] casa_row: Down goes back to the dock tile Up came from,
  as on the top bar
 
 The row's buttons had no key rule, so Down from the light or the heater let the

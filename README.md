@@ -74,8 +74,8 @@ are watching, and switches the light or the heater from the home screen or a rem
 > light, another for the heater, a door sensor, a gas detector and a temperature and humidity sensor. Add only the
 > ones you want. The [guide](docs/guides/home-automation.md#what-you-need) says what to look for.
 
-<sub>The door alerts are drawn with the add-on's colours and sizes; the gas alarm, the panel and the clock are crops of
-real screenshots (CC BY-SA wallpapers, see [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+<sub>Drawn with the add-on's colours, sizes and English texts. On a TV in Spanish the same alerts come out in
+Spanish: Casa follows the TV's language.</sub>
 
 ## Remote buttons
 

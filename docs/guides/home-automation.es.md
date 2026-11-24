@@ -88,4 +88,6 @@ Además:
 
 - Solo Smart Life / Tuya por ahora. **Home Assistant está en camino.**
 - Los avisos necesitan la tele encendida.
+- Casa habla inglés y español y sigue el idioma de la tele; en una tele en otro idioma sale en inglés. Las
+  traducciones son bienvenidas (ver [CONTRIBUTING.es.md](../../CONTRIBUTING.es.md#traducciones)).
 - Probado en una TCL con Google TV y en un Fire TV Stick 4K Max.

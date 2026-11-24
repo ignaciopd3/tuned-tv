@@ -1,7 +1,7 @@
-From a12e27534463a4c665cd7ae3ae7c46c7435b7ccd Mon Sep 17 00:00:00 2001
+From 89a5aaf7a7a68fc2a11dd0f35c9bde0c0fca9577 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 07:48:47 +0100
-Subject: [PATCH 03/23] ADB warning in the greeting and as a dot on the library
+Subject: [PATCH 03/24] ADB warning in the greeting and as a dot on the library
  button; weather lines never cut
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

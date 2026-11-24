@@ -1,7 +1,7 @@
-From 5a76a2181fe2473ec1f4e473b8d97480b123b849 Mon Sep 17 00:00:00 2001
+From 59c71ecc0219d0ff98467b0bafa04e4c386a685d Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 23:01:58 +0100
-Subject: [PATCH 09/23] VPN pill opens the app whose VPN is up: vpn_app_per_app
+Subject: [PATCH 09/24] VPN pill opens the app whose VPN is up: vpn_app_per_app
  for a per-app VPN
 
 Android does not tell Home whose VPN is up, only whether it covers Home. A per-app VPN

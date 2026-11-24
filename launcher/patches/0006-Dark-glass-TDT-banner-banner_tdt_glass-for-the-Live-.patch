@@ -1,7 +1,7 @@
-From b3a9d0e27a5e8cb49ba76f8007096a47441879c1 Mon Sep 17 00:00:00 2001
+From abf1deac2c778a67436d6a0b10fb25b5e251346d Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 22:21:04 +0100
-Subject: [PATCH 06/23] Dark glass TDT banner (banner_tdt_glass) for the Live
+Subject: [PATCH 06/24] Dark glass TDT banner (banner_tdt_glass) for the Live
  TV tile
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

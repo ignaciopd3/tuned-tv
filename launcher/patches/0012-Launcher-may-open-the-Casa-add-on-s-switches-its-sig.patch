@@ -1,7 +1,7 @@
-From 51e11da5e32b4ec0cdfefa902cba52870c4d4951 Mon Sep 17 00:00:00 2001
+From f99bc4c0abbe411efa3dc1307f3af2fdcdaeb616 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 10:43:42 +0100
-Subject: [PATCH 12/23] Launcher may open the Casa add-on's switches (its
+Subject: [PATCH 12/24] Launcher may open the Casa add-on's switches (its
  signature permission)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

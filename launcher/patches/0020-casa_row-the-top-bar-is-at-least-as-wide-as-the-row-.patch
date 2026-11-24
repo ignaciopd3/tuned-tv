@@ -1,7 +1,7 @@
-From 1d54b69e640bff1510e3ec39f0d05338bf488a78 Mon Sep 17 00:00:00 2001
+From 379af3e8a2191e8ab502ceea2a89638999a30f39 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Mon, 23 Nov 2026 21:48:53 +0100
-Subject: [PATCH 20/23] casa_row: the top bar is at least as wide as the row,
+Subject: [PATCH 20/24] casa_row: the top bar is at least as wide as the row,
  with fixed room for the values
 
 The row took the top bar's width, so on a TV whose bar has few buttons (a Fire TV

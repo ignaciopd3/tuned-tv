@@ -130,6 +130,19 @@ uv run python -m tvopt.core.privacy
   `git format-patch` a `launcher/patches/`, manteniendo la numeración. Lo que no sea propio de Tuned TV, mándalo también
   a cleanyourtv.
 
+## Traducciones
+
+Todo lo que sale en la tele sigue el idioma de la tele. El inglés es el idioma por defecto y el español está
+completo; cualquier otro idioma sale en inglés hasta que alguien lo traduzca.
+
+- **Los textos de Tuned TV en el launcher** están en su `strings.xml` (`values/` en inglés, `values-es/` en español),
+  que añaden los parches de `launcher/patches/`.
+- **El complemento Casa** tiene sus textos en `addons/casa/app/src/main/res/values*/strings.xml`.
+- **Para añadir un idioma**, crea `values-<código>/strings.xml` (por ejemplo `values-fr/`) con los mismos nombres, haz
+  commit en un clon de cleanyourtv y exporta el parche. Las pruebas de Casa comprueban que cada idioma tiene todos
+  los textos con los mismos huecos.
+- Las traducciones no cuestan nada al usar la tele: Android elige el idioma una vez, al abrir la app.
+
 ## Revisión
 
 Un mantenedor revisa cada pull request. El CI tiene que pasar (estilo, tipos, pruebas y el detector de datos privados).

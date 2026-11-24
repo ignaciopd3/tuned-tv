@@ -127,6 +127,19 @@ uv run python -m tvopt.core.privacy
   `git format-patch` into `launcher/patches/`, keeping the numbering. Send fixes that are not specific to Tuned TV
   upstream to cleanyourtv too.
 
+## Translations
+
+Everything on the TV follows the TV's language. English is the default and Spanish is complete; any other language
+falls back to English until someone translates it.
+
+- **The launcher's Tuned TV texts** live in its `strings.xml` (`values/` in English, `values-es/` in Spanish), added
+  by the patches in `launcher/patches/`.
+- **The Casa add-on** has its texts in `addons/casa/app/src/main/res/values*/strings.xml`.
+- **To add a language**, create `values-<code>/strings.xml` (for example `values-fr/`) with the same names, commit it
+  in a cleanyourtv clone and export the patch. Casa's tests check that every language has every text with the same
+  placeholders.
+- Translations cost nothing at run time: Android picks the TV's language once, when the app starts.
+
 ## Reviews
 
 A maintainer reviews every pull request. CI must pass (style, types, tests and the privacy scan). For profiles, a

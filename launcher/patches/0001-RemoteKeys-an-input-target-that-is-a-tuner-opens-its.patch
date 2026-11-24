@@ -1,7 +1,7 @@
-From 60c64c827eef6efccae480fa7da916924243874d Mon Sep 17 00:00:00 2001
+From a2db26b33ca9c8c661fa221c12788fe04b9c6ebe Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 17:11:47 +0100
-Subject: [PATCH 01/23] RemoteKeys: an input: target that is a tuner opens its
+Subject: [PATCH 01/24] RemoteKeys: an input: target that is a tuner opens its
  channel collection
 
 On a TCL G05 (MediaTek, Android 11) the tuner's passthrough URI leaves the last

@@ -1,0 +1,507 @@
+From 2ab9e079f8c321fe875eb171c52cb005892af89a Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 22:45:50 +0100
+Subject: [PATCH 24/24] Casa: English and Spanish texts, following the TV's
+ language
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The door and gas messages were written in Spanish in the code, and the rest of Casa's strings only existed in
+Spanish. English is now the default (values/) and Spanish lives in values-es/, like the launcher; Android picks the
+TV's language when the app starts, so it costs nothing at run time. DoorAlerts says which message and how many
+minutes, and the words come from the strings; readings follow the language ("20.3°", "66%" in English, "20,3°",
+"66 %" in Spanish). The tests read the real strings.xml files: the door in both languages, and every text present in
+both with the same placeholders.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../github/ignaciopd3/casa/CasaProvider.java  |   2 +-
+ .../github/ignaciopd3/casa/CasaService.java   |  15 +--
+ .../io/github/ignaciopd3/casa/DoorAlerts.java |  61 ++++++----
+ .../ignaciopd3/casa/ImportActivity.java       |   2 +-
+ .../io/github/ignaciopd3/casa/Overlay.java    |   7 +-
+ .../java/io/github/ignaciopd3/casa/State.java |  22 +++-
+ .../app/src/main/res/values-es/strings.xml    |  34 ++++++
+ .../casa/app/src/main/res/values/strings.xml  |  43 +++++--
+ .../io/github/ignaciopd3/casa/LogicTest.java  | 106 +++++++++++++++---
+ 9 files changed, 230 insertions(+), 62 deletions(-)
+ create mode 100644 addons/casa/app/src/main/res/values-es/strings.xml
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+index bd64deb..a174107 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+@@ -8,7 +8,7 @@ import android.net.Uri;
+ 
+ /**
+  * The launcher row's data (content://io.github.ignaciopd3.casa.now/now), one row: luz and calefactor (1 on, 0 off,
+- * -1 unknown), temperature and humidity as shown ("20,3°", "66 %", "—"), and whether the cloud is connected. Read
++ * -1 unknown), temperature and humidity as shown ("20.3°", "66%", "—" in English), and whether the cloud is connected. Read
+  * only, and only by apps holding Casa's signature permission (the launcher). Notifies on every change.
+  */
+ public class CasaProvider extends ContentProvider {
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+index 13befc7..c5793ae 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+@@ -204,10 +204,11 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+ 
+     private void show(DoorAlerts.Alert a) {
+         if (a == null) return;
+-        boolean reminder = a.title.startsWith("La puerta sigue");
+-        int color = a.closed ? Overlay.GREEN : Overlay.AMBER;
+-        int icon = a.closed ? R.drawable.ic_check : reminder ? R.drawable.ic_clock : R.drawable.ic_door;
+-        overlay.showSmall(color, icon, a.title, a.sub, a.closed ? 4000 : 5000);
++        boolean closed = a.kind == DoorAlerts.Kind.CLOSED;
++        int color = closed ? Overlay.GREEN : Overlay.AMBER;
++        int icon = closed ? R.drawable.ic_check
++                : a.kind == DoorAlerts.Kind.STILL_OPEN ? R.drawable.ic_clock : R.drawable.ic_door;
++        overlay.showSmall(color, icon, a.title(this::getString), a.sub(this::getString), closed ? 4000 : 5000);
+     }
+ 
+     private void scheduleDoorTick() {
+@@ -237,11 +238,11 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         } else if ("gas-normal".equals(what)) {
+             apply(Roles.GAS, Roles.Field.GAS, "normal");
+         } else if ("puerta".equals(what)) {
+-            show(new DoorAlerts.Alert(false, "Puerta abierta", "El sensor de la puerta se ha abierto"));
++            show(new DoorAlerts.Alert(DoorAlerts.Kind.OPEN, 0));
+         } else if ("sigue".equals(what)) {
+-            show(new DoorAlerts.Alert(false, "La puerta sigue abierta", "Desde hace 5 min · te lo recuerdo cada 5 min"));
++            show(new DoorAlerts.Alert(DoorAlerts.Kind.STILL_OPEN, 5));
+         } else if ("cerrada".equals(what)) {
+-            show(new DoorAlerts.Alert(true, "Puerta cerrada", "Estuvo abierta " + DoorAlerts.duration(7 * 60_000L)));
++            show(new DoorAlerts.Alert(DoorAlerts.Kind.CLOSED, 7));
+         }
+     }
+ 
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
+index 2714fea..828a769 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
+@@ -1,21 +1,44 @@
+ package io.github.ignaciopd3.casa;
+ 
+ /**
+- * What the door sensor's changes should say: "Puerta abierta", then "La puerta sigue abierta" every five minutes
+- * while it stays open (and when the TV is switched on with it open), and "Puerta cerrada" with how long it was open.
+- * The first reading only learns the state; repeated reports of the same state say nothing.
++ * What the door sensor's changes should say: "door open", then "still open" every five minutes while it stays open
++ * (and when the TV is switched on with it open), and "door closed" with how long it was open. The first reading only
++ * learns the state; repeated reports of the same state say nothing. The words come from the app's strings, in the
++ * TV's language.
+  */
+ class DoorAlerts {
+     static final long REMIND_MS = 5 * 60_000L;
+ 
++    /** The app's texts by resource id: Context::getString in the app, the strings.xml files in the tests. */
++    interface Words {
++        String get(int id, Object... args);
++    }
++
++    enum Kind { OPEN, STILL_OPEN, CLOSED }
++
+     static final class Alert {
+-        final boolean closed;
+-        final String title, sub;
++        final Kind kind;
++        final long minutes;   // how long the door has been (or was) open
++
++        Alert(Kind kind, long minutes) {
++            this.kind = kind;
++            this.minutes = minutes;
++        }
+ 
+-        Alert(boolean closed, String title, String sub) {
+-            this.closed = closed;
+-            this.title = title;
+-            this.sub = sub;
++        String title(Words w) {
++            switch (kind) {
++                case OPEN: return w.get(R.string.door_open);
++                case STILL_OPEN: return w.get(R.string.door_still_open);
++                default: return w.get(R.string.door_closed);
++            }
++        }
++
++        String sub(Words w) {
++            switch (kind) {
++                case OPEN: return w.get(R.string.door_open_sub);
++                case STILL_OPEN: return w.get(R.string.door_still_open_sub, duration(w, minutes));
++                default: return w.get(R.string.door_closed_sub, duration(w, minutes));
++            }
+         }
+     }
+ 
+@@ -39,9 +62,9 @@ class DoorAlerts {
+         if (isOpen) {
+             openedAt = now;
+             lastReminderAt = now;
+-            return new Alert(false, "Puerta abierta", "El sensor de la puerta se ha abierto");
++            return new Alert(Kind.OPEN, 0);
+         }
+-        return new Alert(true, "Puerta cerrada", "Estuvo abierta " + duration(now - openedAt));
++        return new Alert(Kind.CLOSED, (now - openedAt) / 60_000L);
+     }
+ 
+     /** Called at nextTickAt(): the five-minute reminder while the door stays open. */
+@@ -61,16 +84,14 @@ class DoorAlerts {
+     }
+ 
+     private Alert stillOpen(long now) {
+-        long min = Math.max(1, (now - openedAt) / 60_000L);
+-        return new Alert(false, "La puerta sigue abierta", "Desde hace " + minutes(min) + " · te lo recuerdo cada 5 min");
+-    }
+-
+-    static String duration(long ms) {
+-        long min = ms / 60_000L;
+-        return min < 1 ? "menos de un minuto" : minutes(min);
++        return new Alert(Kind.STILL_OPEN, Math.max(1, (now - openedAt) / 60_000L));
+     }
+ 
+-    private static String minutes(long min) {
+-        return min < 60 ? min + " min" : (min / 60) + " h" + (min % 60 == 0 ? "" : " " + (min % 60) + " min");
++    /** "less than a minute", "12 min", "1 h", "1 h 10 min", in the TV's language. */
++    static String duration(Words w, long min) {
++        if (min < 1) return w.get(R.string.duration_under_minute);
++        if (min < 60) return w.get(R.string.duration_minutes, min);
++        return min % 60 == 0 ? w.get(R.string.duration_hours, min / 60)
++                : w.get(R.string.duration_hours_minutes, min / 60, min % 60);
+     }
+ }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+index 0a700de..2b88f0d 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+@@ -40,7 +40,7 @@ public class ImportActivity extends Activity {
+             CasaService s = CasaService.running();
+             if (s != null) s.reload();   // otherwise it reads the new configuration when the launcher brings it up
+             Toast.makeText(this, session != null && devices == null ? getString(R.string.session_saved)
+-                    : getString(R.string.imported, kept), Toast.LENGTH_LONG).show();
++                    : getResources().getQuantityString(R.plurals.imported, kept, kept), Toast.LENGTH_LONG).show();
+         } catch (Exception e) {   // bad base64 or a configuration Devices refuses
+             Toast.makeText(this, R.string.import_failed, Toast.LENGTH_LONG).show();
+         }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
+index 0b9ec23..97c8251 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
+@@ -75,12 +75,13 @@ final class Overlay {
+     void showGas() {
+         if (gas != null) return;
+         if (!Settings.canDrawOverlays(ctx)) {
+-            Toast.makeText(ctx, "Alarma de gas: el sensor de gas se ha activado", Toast.LENGTH_LONG).show();
++            Toast.makeText(ctx, R.string.gas_alarm_toast, Toast.LENGTH_LONG).show();
+             return;
+         }
+         gas = new FrameLayout(ctx);
+         gas.setBackgroundColor(0x73000000);
+-        LinearLayout box = capsule(RED, R.drawable.ic_flame, "Alarma de gas", "El sensor de gas se ha activado · pulsa OK para cerrar", true);
++        LinearLayout box = capsule(RED, R.drawable.ic_flame, ctx.getString(R.string.gas_alarm),
++                ctx.getString(R.string.gas_alarm_sub), true);
+         gasSub = (TextView) box.findViewWithTag("sub");
+         FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+@@ -115,7 +116,7 @@ final class Overlay {
+     /** The sensor is back to normal: stop the beep, keep the message until OK. */
+     void gasCleared() {
+         stopBeep();
+-        if (gasSub != null) gasSub.setText("La alarma se ha parado · pulsa OK para cerrar");
++        if (gasSub != null) gasSub.setText(R.string.gas_stopped_sub);
+     }
+ 
+     void dismissGas() {
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
+index 3364302..796660e 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
+@@ -1,6 +1,13 @@
+ package io.github.ignaciopd3.casa;
+ 
+-/** What Casa knows right now, as the launcher's row shows it. Unknown readings show as "—". */
++import java.text.DecimalFormatSymbols;
++import java.text.NumberFormat;
++import java.util.Locale;
++
++/**
++ * What Casa knows right now, as the launcher's row shows it, written the TV's language's way ("20.3°" and "66%" in
++ * English, "20,3°" and "66 %" in Spanish). Unknown readings show as "—".
++ */
+ final class State {
+     Boolean luz, calefactor, doorOpen;
+     Integer temperatureTenths, humidity;
+@@ -8,12 +15,21 @@ final class State {
+     boolean cloudConnected;
+ 
+     static String temperature(Integer tenths) {
++        return temperature(tenths, Locale.getDefault());
++    }
++
++    static String temperature(Integer tenths, Locale locale) {
+         if (tenths == null) return "—";
+         int abs = Math.abs(tenths);
+-        return (tenths < 0 ? "-" : "") + (abs / 10) + "," + (abs % 10) + "°";
++        char point = DecimalFormatSymbols.getInstance(locale).getDecimalSeparator();
++        return (tenths < 0 ? "-" : "") + (abs / 10) + point + (abs % 10) + "°";
+     }
+ 
+     static String humidity(Integer percent) {
+-        return percent == null ? "—" : percent + " %";
++        return humidity(percent, Locale.getDefault());
++    }
++
++    static String humidity(Integer percent, Locale locale) {
++        return percent == null ? "—" : NumberFormat.getPercentInstance(locale).format(percent / 100.0);
+     }
+ }
+diff --git a/addons/casa/app/src/main/res/values-es/strings.xml b/addons/casa/app/src/main/res/values-es/strings.xml
+new file mode 100644
+index 0000000..b1bc7ca
+--- /dev/null
++++ b/addons/casa/app/src/main/res/values-es/strings.xml
+@@ -0,0 +1,34 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">Casa</string>
++    <plurals name="imported">
++        <item quantity="one">Casa: %1$d aparato guardado</item>
++        <item quantity="other">Casa: %1$d aparatos guardados</item>
++    </plurals>
++    <string name="import_failed">Casa: configuración no válida</string>
++    <string name="not_configured">Casa: falta configurar este aparato desde el PC</string>
++    <string name="light_failed">No se pudo cambiar la luz: no responde en la red</string>
++    <string name="heater_failed">No se pudo cambiar el calefactor: no responde en la red</string>
++    <string name="session_saved">Casa: conectada con la nube</string>
++    <string name="not_running">Casa no está en marcha: abre el inicio</string>
++    <string name="cloud_down">Casa: sin conexión con la nube de Tuya</string>
++    <string name="cloud_down_sub">Los avisos de la puerta y el clima no llegan</string>
++    <string name="gas_down">Casa: el sensor de gas no responde por la red</string>
++    <string name="gas_down_sub">El aviso de gas solo llegará por la nube</string>
++
++    <string name="door_open">Puerta abierta</string>
++    <string name="door_open_sub">El sensor de la puerta se ha abierto</string>
++    <string name="door_still_open">La puerta sigue abierta</string>
++    <string name="door_still_open_sub">Desde hace %1$s · te lo recuerdo cada 5 min</string>
++    <string name="door_closed">Puerta cerrada</string>
++    <string name="door_closed_sub">Estuvo abierta %1$s</string>
++    <string name="duration_under_minute">menos de un minuto</string>
++    <string name="duration_minutes">%1$d min</string>
++    <string name="duration_hours">%1$d h</string>
++    <string name="duration_hours_minutes">%1$d h %2$d min</string>
++
++    <string name="gas_alarm">Alarma de gas</string>
++    <string name="gas_alarm_sub">El sensor de gas se ha activado · pulsa OK para cerrar</string>
++    <string name="gas_alarm_toast">Alarma de gas: el sensor de gas se ha activado</string>
++    <string name="gas_stopped_sub">La alarma se ha parado · pulsa OK para cerrar</string>
++</resources>
+diff --git a/addons/casa/app/src/main/res/values/strings.xml b/addons/casa/app/src/main/res/values/strings.xml
+index 83df545..670a3d5 100644
+--- a/addons/casa/app/src/main/res/values/strings.xml
++++ b/addons/casa/app/src/main/res/values/strings.xml
+@@ -1,15 +1,36 @@
+ <?xml version="1.0" encoding="utf-8"?>
++<!-- Casa's texts. English is the default; values-es/ has Spanish. Android picks the TV's language when the app starts,
++     so a translation costs nothing at run time: add values-<language>/strings.xml with the same names. -->
+ <resources>
+     <string name="app_name">Casa</string>
+-    <string name="imported">Casa: %1$d aparatos guardados</string>
+-    <string name="import_failed">Casa: configuración no válida</string>
+-    <string name="not_configured">Casa: falta configurar este aparato desde el PC</string>
+-    <string name="light_failed">No se pudo cambiar la luz: no responde en la red</string>
+-    <string name="heater_failed">No se pudo cambiar el calefactor: no responde en la red</string>
+-    <string name="session_saved">Casa: conectada con la nube</string>
+-    <string name="not_running">Casa no está en marcha: abre el inicio</string>
+-    <string name="cloud_down">Casa: sin conexión con la nube de Tuya</string>
+-    <string name="cloud_down_sub">Los avisos de la puerta y el clima no llegan</string>
+-    <string name="gas_down">Casa: el sensor de gas no responde por la red</string>
+-    <string name="gas_down_sub">El aviso de gas solo llegará por la nube</string>
++    <plurals name="imported">
++        <item quantity="one">Casa: %1$d device saved</item>
++        <item quantity="other">Casa: %1$d devices saved</item>
++    </plurals>
++    <string name="import_failed">Casa: invalid configuration</string>
++    <string name="not_configured">Casa: this device still has to be set up from the PC</string>
++    <string name="light_failed">Couldn\'t switch the light: it doesn\'t answer on the network</string>
++    <string name="heater_failed">Couldn\'t switch the heater: it doesn\'t answer on the network</string>
++    <string name="session_saved">Casa: connected to the cloud</string>
++    <string name="not_running">Casa isn\'t running: open the home screen</string>
++    <string name="cloud_down">Casa: no connection to the Tuya cloud</string>
++    <string name="cloud_down_sub">Door and climate alerts won\'t arrive</string>
++    <string name="gas_down">Casa: the gas sensor doesn\'t answer on the network</string>
++    <string name="gas_down_sub">Gas alerts will only arrive through the cloud</string>
++
++    <string name="door_open">Door open</string>
++    <string name="door_open_sub">The door sensor has opened</string>
++    <string name="door_still_open">The door is still open</string>
++    <string name="door_still_open_sub">Open for %1$s · I\'ll remind you every 5 min</string>
++    <string name="door_closed">Door closed</string>
++    <string name="door_closed_sub">It was open for %1$s</string>
++    <string name="duration_under_minute">less than a minute</string>
++    <string name="duration_minutes">%1$d min</string>
++    <string name="duration_hours">%1$d h</string>
++    <string name="duration_hours_minutes">%1$d h %2$d min</string>
++
++    <string name="gas_alarm">Gas alarm</string>
++    <string name="gas_alarm_sub">The gas sensor has gone off · press OK to close</string>
++    <string name="gas_alarm_toast">Gas alarm: the gas sensor has gone off</string>
++    <string name="gas_stopped_sub">The alarm has stopped · press OK to close</string>
+ </resources>
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
+index a6a6e7e..27e4ff6 100644
+--- a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
+@@ -2,29 +2,84 @@ package io.github.ignaciopd3.casa;
+ 
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
+ 
++import java.lang.reflect.Field;
++import java.util.ArrayList;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.TreeMap;
+ import org.junit.Test;
+ 
+-/** The door's messages, MQTT reports and the readings' wording: no Android, no network. */
++/** The door's messages in English and Spanish, MQTT reports and the readings' wording: no Android, no network. */
+ public class LogicTest {
+     private static final long MIN = 60_000L;
+ 
++    private static final DoorAlerts.Words EN = words("values", Locale.US), ES = words("values-es", new Locale("es", "ES"));
++
++    /** The module's real strings.xml for a language, as the app's getString would format them. */
++    private static DoorAlerts.Words words(String dir, Locale locale) {
++        try {
++            Map<String, String> byName = strings(dir);
++            Map<Integer, String> byId = new HashMap<>();
++            for (Field f : R.string.class.getFields()) byId.put(f.getInt(null), byName.get(f.getName()));
++            return (id, args) -> String.format(locale, byId.get(id), args);
++        } catch (Exception e) {
++            throw new AssertionError(e);
++        }
++    }
++
++    /** name → text of src/main/res/<dir>/strings.xml (plurals as "plurals:<name>", their "other" form). */
++    private static Map<String, String> strings(String dir) throws Exception {
++        org.w3c.dom.Document doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
++                .parse(new java.io.File("src/main/res/" + dir + "/strings.xml"));
++        Map<String, String> out = new TreeMap<>();
++        org.w3c.dom.NodeList ss = doc.getElementsByTagName("string");
++        for (int i = 0; i < ss.getLength(); i++) {
++            org.w3c.dom.Element e = (org.w3c.dom.Element) ss.item(i);
++            out.put(e.getAttribute("name"), e.getTextContent().replace("\\'", "'").replace("\\\"", "\""));
++        }
++        org.w3c.dom.NodeList ps = doc.getElementsByTagName("item");
++        for (int i = 0; i < ps.getLength(); i++) {
++            org.w3c.dom.Element e = (org.w3c.dom.Element) ps.item(i);
++            if (!"other".equals(e.getAttribute("quantity"))) continue;
++            String name = ((org.w3c.dom.Element) e.getParentNode()).getAttribute("name");
++            out.put("plurals:" + name, e.getTextContent());
++        }
++        return out;
++    }
++
++    private static List<String> placeholders(String text) {
++        List<String> out = new ArrayList<>();
++        java.util.regex.Matcher m = java.util.regex.Pattern.compile("%\\d+\\$[sd]").matcher(text);
++        while (m.find()) out.add(m.group());
++        java.util.Collections.sort(out);
++        return out;
++    }
++
+     @Test
+     public void theDoorSaysOpenRemindsEveryFiveMinutesAndSaysHowLongWhenClosed() {
+         DoorAlerts d = new DoorAlerts();
+         d.init(false, 0);
+         DoorAlerts.Alert open = d.onDoor(true, 1000);
+-        assertEquals("Puerta abierta", open.title);
++        assertEquals("Door open", open.title(EN));
++        assertEquals("Puerta abierta", open.title(ES));
++        assertEquals("The door sensor has opened", open.sub(EN));
+         assertNull(d.onTick(1000 + 4 * MIN));
+         DoorAlerts.Alert r1 = d.onTick(1000 + 5 * MIN);
+-        assertEquals("La puerta sigue abierta", r1.title);
+-        assertEquals("Desde hace 5 min · te lo recuerdo cada 5 min", r1.sub);
++        assertEquals("The door is still open", r1.title(EN));
++        assertEquals("Open for 5 min · I'll remind you every 5 min", r1.sub(EN));
++        assertEquals("La puerta sigue abierta", r1.title(ES));
++        assertEquals("Desde hace 5 min · te lo recuerdo cada 5 min", r1.sub(ES));
+         assertNull(d.onTick(1000 + 6 * MIN));
+-        assertEquals("Desde hace 10 min · te lo recuerdo cada 5 min", d.onTick(1000 + 10 * MIN).sub);
++        assertEquals("Desde hace 10 min · te lo recuerdo cada 5 min", d.onTick(1000 + 10 * MIN).sub(ES));
+         DoorAlerts.Alert closed = d.onDoor(false, 1000 + 12 * MIN);
+-        assertEquals("Puerta cerrada", closed.title);
+-        assertEquals("Estuvo abierta 12 min", closed.sub);
++        assertEquals("Door closed", closed.title(EN));
++        assertEquals("It was open for 12 min", closed.sub(EN));
++        assertEquals("Puerta cerrada", closed.title(ES));
++        assertEquals("Estuvo abierta 12 min", closed.sub(ES));
+         assertNull(d.onTick(1000 + 20 * MIN));
+     }
+ 
+@@ -33,17 +88,20 @@ public class LogicTest {
+         DoorAlerts d = new DoorAlerts();
+         assertNull(d.onDoor(true, 0));     // first reading: just learns the state
+         assertNull(d.onDoor(true, 5));     // the same state again
+-        assertEquals("Estuvo abierta menos de un minuto", d.onDoor(false, 30_000).sub);
++        DoorAlerts.Alert closed = d.onDoor(false, 30_000);
++        assertEquals("Estuvo abierta menos de un minuto", closed.sub(ES));
++        assertEquals("It was open for less than a minute", closed.sub(EN));
+     }
+ 
+     @Test
+     public void turningTheTvOnWithTheDoorOpenReminds() {
+         DoorAlerts d = new DoorAlerts();
+         d.init(true, 0);
+-        assertEquals("Desde hace 1 h 5 min · te lo recuerdo cada 5 min", d.onScreenOn(65 * MIN).sub);
++        assertEquals("Desde hace 1 h 5 min · te lo recuerdo cada 5 min", d.onScreenOn(65 * MIN).sub(ES));
+         d.onDoor(false, 70 * MIN);
+         assertNull(d.onScreenOn(71 * MIN));
+-        assertEquals("Estuvo abierta 1 h 10 min", new DoorAlerts() {{ init(true, 0); }}.onDoor(false, 70 * MIN).sub);
++        assertEquals("Estuvo abierta 1 h 10 min", new DoorAlerts() {{ init(true, 0); }}.onDoor(false, 70 * MIN).sub(ES));
++        assertEquals("It was open for 2 h", new DoorAlerts() {{ init(true, 0); }}.onDoor(false, 120 * MIN).sub(EN));
+     }
+ 
+     @Test
+@@ -80,12 +138,28 @@ public class LogicTest {
+     }
+ 
+     @Test
+-    public void readingsAreWrittenTheSpanishWay() {
+-        assertEquals("20,3°", State.temperature(203));
+-        assertEquals("-1,5°", State.temperature(-15));
+-        assertEquals("—", State.temperature(null));
+-        assertEquals("66 %", State.humidity(66));
+-        assertEquals("—", State.humidity(null));
++    public void readingsAreWrittenTheTvLanguagesWay() {
++        Locale es = new Locale("es", "ES");
++        assertEquals("20,3°", State.temperature(203, es));
++        assertEquals("-1,5°", State.temperature(-15, es));
++        assertEquals("66\u00a0%", State.humidity(66, es));
++        assertEquals("20.3°", State.temperature(203, Locale.US));
++        assertEquals("-1.5°", State.temperature(-15, Locale.US));
++        assertEquals("66%", State.humidity(66, Locale.US));
++        assertEquals("—", State.temperature(null, Locale.US));
++        assertEquals("—", State.humidity(null, es));
++    }
++
++    @Test
++    public void everyTextIsInEnglishAndSpanishWithTheSamePlaceholders() throws Exception {
++        Map<String, String> en = strings("values"), es = strings("values-es");
++        assertEquals(en.keySet(), es.keySet());
++        for (String name : en.keySet()) {
++            assertEquals(name, placeholders(en.get(name)), placeholders(es.get(name)));
++        }
++        for (Field f : R.string.class.getFields()) {
++            assertTrue("missing in strings.xml: " + f.getName(), en.containsKey(f.getName()));
++        }
+     }
+ 
+     /** A 3.4 frame as the sensor sends it: return code in clear, then the ECB payload, then the HMAC. */
+-- 
+2.54.0.windows.1
+
