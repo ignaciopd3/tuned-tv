@@ -1,0 +1,34 @@
+# Nivel precaución: solo con --include-caution y tras OK explícito del dueño.
+# Las líneas «# KEEP» se quedan activas en este perfil (2026-11-17); las demás se deshabilitan.
+# Formato: paquete [disable|uninstall]   # motivo
+
+# Actualizaciones
+com.tcl.ttvs                            # analítica BI y Samba TV ACR (registra lo que ves); quitado el 2026-11-17. Contiene el
+#                                       # actualizador de firmware: sin OTA hasta reactivarlo (pm enable com.tcl.ttvs).
+com.tcl.UpdatePeripheral                # actualizador del firmware del mando y barra de sonido TCL; ~100 MB residente. Quitado 2026-11-17
+
+# Botón TCL (4020): el firmware lo envía fijo a partnercustomizer (startTKey). Lo atiende el launcher (app_keys).
+com.tcl.partnercustomizer               # panel TCL (startTKey) y filas de TCL en el inicio
+
+# Launcher Clean Your TV (2026-11-17, elegido por rendimiento). Orden: setupwraith primero, con launcherx aún de Home.
+# Antes: cmd wifi forget-network de la red oculta de fábrica que era de setupwraith (la red en uso es de android.uid.system).
+com.google.android.tungsten.setupwraith # asistente de primer arranque; su RecoveryActivity reclama Home sin launcherx
+# com.google.android.apps.tv.launcherx  # lo deshabilita cleanyourtv/launcher/build-and-install.sh (comprueba Home y revierte solo)
+
+# Voz
+# com.google.android.katniss y com.google.android.tv.assistant pasaron a packages.remove el 2026-11-22.
+
+# Envío de contenido desde el móvil
+# KEEP com.google.android.apps.mediashell   # Chromecast integrado
+# com.tcl.airplay2 y com.mediatek.AirplayAPK (AirPlay) pasaron a packages.remove el 2026-11-22.
+com.tcl.miracast                        # duplicar pantalla (Miracast)
+com.tcl.MultiScreenInteraction_TV           # T-Cast de TCL
+
+# Imagen y sonido
+# KEEP com.tcl.gamebar                  # modo juego / VRR para consolas
+# KEEP com.tcl.hearaid                  # adaptación de volumen y prueba de audición
+# KEEP com.tcl.t_solo                   # «escuchar solo» por Bluetooth
+
+# Apps preinstaladas
+tv.wuaki.apptv                          # Rakuten TV
+com.google.android.youtube.tvmusic          # YouTube Music

@@ -1,0 +1,188 @@
+From 5bb57803c28003338380a2cdb31588967a892c8f Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 16:57:13 +0100
+Subject: [PATCH 04/23] Header and top-bar capsules (header_capsule,
+ top_bar_capsule)
+
+header_capsule puts dark glass behind the greeting, clock, date and weather,
+sized to them, so the header reads over a bright wallpaper. top_bar_capsule
+puts the top buttons inside one dark glass capsule level with the header's
+middle; each button fills white only while focused and the VPN button keeps
+its state ring. Both off by default; a theme turns them on.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../main/java/com/gathin/tvhome/Config.java   | 15 ++++-
+ .../java/com/gathin/tvhome/MainActivity.java  | 66 +++++++++++++++++++
+ launcher/app/src/main/res/values/config.xml   |  8 +++
+ 3 files changed, 87 insertions(+), 2 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 06600dc..1dbead7 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -144,6 +144,10 @@ final class Config {
+     final String weatherApp;
+     /** adb_warning: while ADB is reachable over the network, a red greeting and a red dot on the library button. */
+     final boolean adbWarning;
++    /** header_capsule: a dark glass panel behind the greeting, clock, date and weather, sized to them. */
++    final boolean headerCapsule;
++    /** top_bar_capsule: the top buttons inside one dark glass capsule; each fills white only while focused. */
++    final boolean topBarCapsule;
+     /** App library as a round button in the top bar (config.xml library_button); needs app_library. */
+     final boolean libraryButton;
+     /** The App library pill after the last Home row; false hides it while libraryButton is on (show_library_pill). */
+@@ -303,9 +307,12 @@ final class Config {
+                    boolean handleViewInputs, boolean tileMenu, boolean dockEvenPadding, boolean dockBand, boolean cinematicDots, boolean cinematicWhiteFocus, boolean wifiStatusColor, int cinematicScrim, int cinematicArt,
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+-                   boolean settingsKeyClearTask, String weatherApp, boolean adbWarning) {
++                   boolean settingsKeyClearTask, String weatherApp, boolean adbWarning,
++                   boolean headerCapsule, boolean topBarCapsule) {
+         this.weatherApp = weatherApp;
+         this.adbWarning = adbWarning;
++        this.headerCapsule = headerCapsule;
++        this.topBarCapsule = topBarCapsule;
+         this.handleViewInputs = handleViewInputs;
+         this.tileMenu = tileMenu;
+         this.inputKeycodes = inputKeycodes;
+@@ -494,6 +501,8 @@ final class Config {
+         boolean settingsKeyClearTask = res.getBoolean(R.bool.settings_key_clear_task);
+         String weatherApp = res.getString(R.string.weather_app).trim();
+         boolean adbWarning = res.getBoolean(R.bool.adb_warning);
++        boolean headerCapsule = res.getBoolean(R.bool.header_capsule);
++        boolean topBarCapsule = res.getBoolean(R.bool.top_bar_capsule);
+         boolean libraryButton = res.getBoolean(R.bool.library_button);
+         boolean showLibraryPill = res.getBoolean(R.bool.show_library_pill);
+         int wifiLabelWidth = res.getInteger(R.integer.wifi_label_width);
+@@ -613,6 +622,8 @@ final class Config {
+             settingsKeyClearTask = bool(json, "settings_key_clear_task", settingsKeyClearTask);
+             weatherApp = string(json, "weather_app", weatherApp).trim();
+             adbWarning = bool(json, "adb_warning", adbWarning);
++            headerCapsule = bool(json, "header_capsule", headerCapsule);
++            topBarCapsule = bool(json, "top_bar_capsule", topBarCapsule);
+             libraryButton = bool(json, "library_button", libraryButton);
+             showLibraryPill = bool(json, "show_library_pill", showLibraryPill);
+             wifiLabelWidth = integer(json, "wifi_label_width", wifiLabelWidth, 0, 300);
+@@ -742,7 +753,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarning);
++                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index 01300e3..d48dd76 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -31,6 +31,7 @@ import android.graphics.drawable.ColorDrawable;
+ import android.graphics.drawable.Drawable;
+ import android.graphics.drawable.GradientDrawable;
+ import android.graphics.drawable.LayerDrawable;
++import android.graphics.drawable.StateListDrawable;
+ import android.media.tv.TvContract;
+ import android.media.tv.TvInputInfo;
+ import android.media.tv.TvInputManager;
+@@ -903,6 +904,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             makeIconOnly((TextView) btnSettings);
+         }
+         if (cfg.iconOnlyInputs) makeIconOnly((TextView) btnInputs);
++        applyHeaderCapsules(cfg);
+         iconOnlyVpn = vpnPill && cfg.iconOnlyVpn;
+         if (iconOnlyVpn) {
+             vpnPlainBackground = btnVpn.getBackground().getConstantState();
+@@ -2564,6 +2566,70 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+     }
+ 
++    /**
++     * header_capsule: dark glass behind the greeting, clock, date and weather, sized to them. top_bar_capsule: the
++     * top buttons inside one dark glass capsule, level with the header's middle; each button drops its own glass and
++     * fills white only while focused. Runs before the VPN button keeps its plain background, so a VPN that goes down
++     * falls back to the capsule's button rather than a glass circle.
++     */
++    private void applyHeaderCapsules(Config cfg) {
++        if (cfg.headerCapsule) {
++            View block = findViewById(R.id.leftBlock);
++            block.setBackground(darkGlass(22));
++            block.setPaddingRelative(Math.round(20 * density), Math.round(12 * density),
++                    Math.round(24 * density), Math.round(14 * density));
++            ViewGroup.LayoutParams lp = block.getLayoutParams();
++            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
++            block.setLayoutParams(lp);
++        }
++        if (!cfg.topBarCapsule) return;
++        LinearLayout bar = findViewById(R.id.topButtons);
++        int pad = Math.round(6 * density), gap = Math.round(4 * density);
++        bar.setBackground(darkGlass(27));
++        // Each button keeps a gap before it, so the start padding is short by that gap.
++        bar.setPaddingRelative(pad - gap, pad, pad, pad);
++        bar.setGravity(Gravity.CENTER_VERTICAL);
++        for (int i = 0; i < bar.getChildCount(); i++) {
++            View button = bar.getChildAt(i);
++            button.setBackground(capsuleButton());
++            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) button.getLayoutParams();
++            mlp.setMarginStart(gap);
++            button.setLayoutParams(mlp);
++        }
++        RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) bar.getLayoutParams();
++        lp.removeRule(RelativeLayout.ALIGN_BOTTOM);
++        lp.removeRule(RelativeLayout.ALIGN_TOP);
++        lp.addRule(RelativeLayout.CENTER_VERTICAL);
++        lp.topMargin = 0;
++        lp.bottomMargin = 0;
++        bar.setLayoutParams(lp);
++    }
++
++    /** The capsules' dark glass: translucent near-black with a faint white edge, like the dark dock band. */
++    private GradientDrawable darkGlass(int radiusDp) {
++        GradientDrawable glass = new GradientDrawable();
++        glass.setColor(0x8C080A10);
++        glass.setCornerRadius(radiusDp * density);
++        glass.setStroke(Math.max(1, Math.round(density)), 0x24FFFFFF);
++        return glass;
++    }
++
++    /** A button inside the top-bar capsule: clear at rest, white while focused, blue while reorder mode is on (pill_bg). */
++    private StateListDrawable capsuleButton() {
++        StateListDrawable bg = new StateListDrawable();
++        GradientDrawable focused = new GradientDrawable();
++        focused.setColor(0xF5FFFFFF);
++        focused.setCornerRadius(21 * density);
++        bg.addState(new int[]{android.R.attr.state_focused}, focused);
++        GradientDrawable reorder = new GradientDrawable();
++        reorder.setColor(0x596EC1FF);
++        reorder.setStroke(Math.round(1.5f * density), 0xFF6EC1FF);
++        reorder.setCornerRadius(21 * density);
++        bg.addState(new int[]{android.R.attr.state_activated}, reorder);
++        bg.addState(new int[0], new ColorDrawable(Color.TRANSPARENT));
++        return bg;
++    }
++
+     /** Centre the one-row header when the greeting and extra date lines are absent (#2265). */
+     private void centerCompactHeader() {
+         LinearLayout clockRow = (LinearLayout) findViewById(R.id.clock).getParent();
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index f2ca738..620aa25 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -498,6 +498,14 @@
+          Off by default. A theme can set "adb_warning". -->
+     <bool name="adb_warning">false</bool>
+ 
++    <!-- A dark glass panel behind the greeting, clock, date and weather, sized to them, so the header reads over a
++         bright wallpaper. Off by default. A theme can set "header_capsule". -->
++    <bool name="header_capsule">false</bool>
++    <!-- The top buttons inside one dark glass capsule instead of each in its own glass circle; a button fills white
++         only while focused, and the VPN button keeps its state ring. Off by default. A theme can set
++         "top_bar_capsule". -->
++    <bool name="top_bar_capsule">false</bool>
++
+     <!-- Time-of-day backdrop behind everything: a dark gradient that follows the clock, with a warm
+          horizon glow around sunrise and sunset. 0 keeps the plain background (the default); 1 to 100
+          sets its opacity. Around 60 reads clearly without hiding a wallpaper. Can also be set with
+-- 
+2.54.0.windows.1
+

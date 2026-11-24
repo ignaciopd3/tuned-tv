@@ -1,0 +1,2248 @@
+From ae60bc07fb9e449ff01bb3d8343a263c99743042 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 11:11:59 +0100
+Subject: [PATCH 13/23] Casa: the door, the climate and the gas, with messages
+ over any channel
+
+A foreground service that reads the devices' status from Tuya's device-sharing
+cloud (CloudApi, checked against the official SDK), follows its MQTT reports,
+watches the gas sensor on the home network (protocol 3.4, kept open with a
+heartbeat), publishes the state for the launcher (CasaProvider) and shows the
+door messages (open, still open every 5 minutes, closed) and the gas alarm
+(darkened screen, beep, until OK) over whatever is on screen.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ addons/casa/app/build.gradle                  |   2 +
+ addons/casa/app/proguard-rules.pro            |   3 +
+ addons/casa/app/src/main/AndroidManifest.xml  |  26 ++
+ .../github/ignaciopd3/casa/BootReceiver.java  |  13 +
+ .../github/ignaciopd3/casa/CasaProvider.java  |  60 ++++
+ .../github/ignaciopd3/casa/CasaService.java   | 303 ++++++++++++++++++
+ .../io/github/ignaciopd3/casa/CloudApi.java   | 275 ++++++++++++++++
+ .../io/github/ignaciopd3/casa/Devices.java    |  54 +++-
+ .../io/github/ignaciopd3/casa/DoorAlerts.java |  76 +++++
+ .../io/github/ignaciopd3/casa/Frames.java     |  58 +++-
+ .../io/github/ignaciopd3/casa/GasWatch.java   | 106 ++++++
+ .../ignaciopd3/casa/ImportActivity.java       |  39 ++-
+ .../io/github/ignaciopd3/casa/MqttWatch.java  | 134 ++++++++
+ .../io/github/ignaciopd3/casa/Overlay.java    | 202 ++++++++++++
+ .../io/github/ignaciopd3/casa/Reports.java    |  44 +++
+ .../java/io/github/ignaciopd3/casa/Roles.java |  31 ++
+ .../java/io/github/ignaciopd3/casa/State.java |  19 ++
+ .../github/ignaciopd3/casa/ToggleService.java |   2 +-
+ .../io/github/ignaciopd3/casa/TuyaLocal.java  |   6 +-
+ .../app/src/main/res/drawable/ic_bulb.xml     |   7 +
+ .../app/src/main/res/drawable/ic_check.xml    |   7 +
+ .../app/src/main/res/drawable/ic_clock.xml    |   7 +
+ .../app/src/main/res/drawable/ic_door.xml     |   7 +
+ .../app/src/main/res/drawable/ic_flame.xml    |   7 +
+ .../app/src/main/res/drawable/ic_info.xml     |   7 +
+ .../casa/app/src/main/res/values/strings.xml  |   6 +
+ .../github/ignaciopd3/casa/CloudApiTest.java  | 151 +++++++++
+ .../io/github/ignaciopd3/casa/FramesTest.java |  26 ++
+ .../io/github/ignaciopd3/casa/LogicTest.java  | 143 +++++++++
+ .../casa/app/src/test/resources/vectors.json  |  54 ++++
+ 30 files changed, 1852 insertions(+), 23 deletions(-)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CloudApi.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/GasWatch.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/MqttWatch.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Reports.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Roles.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_bulb.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_check.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_clock.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_door.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_flame.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_info.xml
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/CloudApiTest.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
+
+diff --git a/addons/casa/app/build.gradle b/addons/casa/app/build.gradle
+index d43b282..83214af 100644
+--- a/addons/casa/app/build.gradle
++++ b/addons/casa/app/build.gradle
+@@ -30,6 +30,8 @@ android {
+ }
+ 
+ dependencies {
++    // Tuya's MQTT reports (the door, the climate, the plugs): plain Java, no Android service.
++    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+     testImplementation 'junit:junit:4.13.2'
+     // Android's own org.json is a stub in JVM tests.
+     testImplementation 'org.json:json:20231013'
+diff --git a/addons/casa/app/proguard-rules.pro b/addons/casa/app/proguard-rules.pro
+index a4435d6..1475c2e 100644
+--- a/addons/casa/app/proguard-rules.pro
++++ b/addons/casa/app/proguard-rules.pro
+@@ -1,2 +1,5 @@
+ # Keep class and method names: readable stack traces matter more than the last few KB in a sideloaded app.
+ -dontobfuscate
++# Paho loads its network modules and messages by name.
++-keep class org.eclipse.paho.client.mqttv3.** { *; }
++-dontwarn org.eclipse.paho.client.mqttv3.**
+diff --git a/addons/casa/app/src/main/AndroidManifest.xml b/addons/casa/app/src/main/AndroidManifest.xml
+index 524e67c..6dfcf93 100644
+--- a/addons/casa/app/src/main/AndroidManifest.xml
++++ b/addons/casa/app/src/main/AndroidManifest.xml
+@@ -5,6 +5,12 @@
+ 
+     <!-- Talking to the smart plugs over the home network (Tuya LAN protocol, port 6668). -->
+     <uses-permission android:name="android.permission.INTERNET" />
++    <!-- Staying up for the alerts (TCL stops background work) and coming back with the TV. -->
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
++    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <!-- The door and gas messages over any channel or app; granted from the PC (appops). -->
++    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+ 
+     <!-- Only apps signed with the same key (the launcher) may switch the plugs. -->
+     <permission
+@@ -45,5 +51,25 @@
+         <service
+             android:name=".ToggleService"
+             android:exported="false" />
++
++        <service
++            android:name=".CasaService"
++            android:exported="false"
++            android:foregroundServiceType="dataSync" />
++
++        <receiver
++            android:name=".BootReceiver"
++            android:exported="true">
++            <intent-filter>
++                <action android:name="android.intent.action.BOOT_COMPLETED" />
++            </intent-filter>
++        </receiver>
++
++        <!-- The launcher row reads the state here; only apps with the signature permission (the launcher) can. -->
++        <provider
++            android:name=".CasaProvider"
++            android:authorities="io.github.ignaciopd3.casa.now"
++            android:exported="true"
++            android:readPermission="io.github.ignaciopd3.casa.permission.CONTROL" />
+     </application>
+ </manifest>
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
+new file mode 100644
+index 0000000..3514ae4
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
+@@ -0,0 +1,13 @@
++package io.github.ignaciopd3.casa;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++
++/** Brings Casa back when the TV starts (needs APP_AUTO_START allow on TCL, which tools/launcher.sh grants). */
++public class BootReceiver extends BroadcastReceiver {
++    @Override
++    public void onReceive(Context context, Intent intent) {
++        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) CasaService.start(context);
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+new file mode 100644
+index 0000000..c386253
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+@@ -0,0 +1,60 @@
++package io.github.ignaciopd3.casa;
++
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.database.MatrixCursor;
++import android.net.Uri;
++
++/**
++ * The launcher row's data (content://io.github.ignaciopd3.casa.now/now), one row: luz and calefactor (1 on, 0 off,
++ * -1 unknown), temperature and humidity as shown ("20,3°", "66 %", "—"), and whether the cloud is connected. Read
++ * only, and only by apps holding Casa's signature permission (the launcher). Notifies on every change.
++ */
++public class CasaProvider extends ContentProvider {
++    static final String[] COLUMNS = {"luz", "calefactor", "temperature", "humidity", "cloud"};
++
++    @Override
++    public boolean onCreate() {
++        try {
++            CasaService.start(getContext());   // whoever asks first brings Casa up
++        } catch (RuntimeException notNow) {
++            // started again by the next query or by the TV coming on
++        }
++        return true;
++    }
++
++    @Override
++    public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
++        State s = CasaService.state;
++        MatrixCursor c = new MatrixCursor(COLUMNS, 1);
++        c.addRow(new Object[] {tri(s.luz), tri(s.calefactor), State.temperature(s.temperatureTenths),
++                State.humidity(s.humidity), s.cloudConnected ? 1 : 0});
++        c.setNotificationUri(getContext().getContentResolver(), CasaService.NOW);
++        return c;
++    }
++
++    private static int tri(Boolean b) {
++        return b == null ? -1 : b ? 1 : 0;
++    }
++
++    @Override
++    public String getType(Uri uri) {
++        return "vnd.android.cursor.item/vnd.io.github.ignaciopd3.casa.now";
++    }
++
++    @Override
++    public Uri insert(Uri uri, ContentValues values) {
++        return null;
++    }
++
++    @Override
++    public int delete(Uri uri, String selection, String[] selectionArgs) {
++        return 0;
++    }
++
++    @Override
++    public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
++        return 0;
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+new file mode 100644
+index 0000000..d06dde2
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+@@ -0,0 +1,303 @@
++package io.github.ignaciopd3.casa;
++
++import android.app.Notification;
++import android.app.NotificationChannel;
++import android.app.NotificationManager;
++import android.app.Service;
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.IBinder;
++import android.os.Looper;
++import java.security.SecureRandom;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import org.json.JSONException;
++
++/**
++ * Casa running: the cloud (status at start-up, then MQTT), the gas sensor on the home network, the door messages and
++ * the state the launcher row reads (CasaProvider). A foreground service, as TCL stops background work; it comes back
++ * with the TV (BootReceiver) and whenever any part of Casa starts.
++ */
++public class CasaService extends Service implements MqttWatch.Listener, GasWatch.Listener {
++    static final Uri NOW = Uri.parse("content://io.github.ignaciopd3.casa.now/now");
++    static final String ACTION_STATE = "io.github.ignaciopd3.casa.STATE", ACTION_RELOAD = "io.github.ignaciopd3.casa.RELOAD",
++            ACTION_SIMULATE = "io.github.ignaciopd3.casa.SIMULATE";
++    static final String EXTRA_ROLE = "role", EXTRA_ON = "on", EXTRA_WHAT = "what";
++    private static final long WARN_AFTER_MS = 5 * 60_000L, HEALTH_EVERY_MS = 60_000L;
++    private static final String CHANNEL = "casa";
++
++    /** What Casa knows now; CasaProvider answers from it. Replaced, never mutated, so readers see a whole state. */
++    static volatile State state = new State();
++
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final DoorAlerts door = new DoorAlerts();
++    private Overlay overlay;
++    private MqttWatch mqtt;
++    private GasWatch gasWatch;
++    private String lastGas;
++    private long cloudDownSince, gasDownSince;
++    private boolean cloudWarned, gasWarned, doorKnown;
++
++    private final Runnable doorTick = new Runnable() {
++        @Override
++        public void run() {
++            show(door.onTick(System.currentTimeMillis()));
++            scheduleDoorTick();
++        }
++    };
++    private final Runnable health = new Runnable() {
++        @Override
++        public void run() {
++            checkHealth();
++            main.postDelayed(this, HEALTH_EVERY_MS);
++        }
++    };
++    private final BroadcastReceiver screenOn = new BroadcastReceiver() {
++        @Override
++        public void onReceive(Context c, Intent i) {
++            show(door.onScreenOn(System.currentTimeMillis()));
++        }
++    };
++
++    static void start(Context ctx) {
++        ctx.startForegroundService(new Intent(ctx, CasaService.class));
++    }
++
++    /** A plug switched from the TV (ToggleService): the row shows it at once, before the cloud says so. */
++    static void reportSwitch(Context ctx, String role, boolean on) {
++        ctx.startForegroundService(new Intent(ctx, CasaService.class).setAction(ACTION_STATE)
++                .putExtra(EXTRA_ROLE, role).putExtra(EXTRA_ON, on));
++    }
++
++    @Override
++    public void onCreate() {
++        super.onCreate();
++        NotificationManager nm = getSystemService(NotificationManager.class);
++        nm.createNotificationChannel(new NotificationChannel(CHANNEL, getString(R.string.app_name), NotificationManager.IMPORTANCE_MIN));
++        Notification n = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_bulb)
++                .setContentTitle(getString(R.string.app_name)).setContentText(getString(R.string.service_running)).build();
++        startForeground(1, n);
++        overlay = new Overlay(this);
++        registerReceiver(screenOn, new IntentFilter(Intent.ACTION_SCREEN_ON));
++        startWatchers();
++        main.postDelayed(health, HEALTH_EVERY_MS);
++    }
++
++    @Override
++    public int onStartCommand(Intent intent, int flags, int startId) {
++        String action = intent == null ? null : intent.getAction();
++        if (ACTION_STATE.equals(action)) {
++            apply(intent.getStringExtra(EXTRA_ROLE), Roles.Field.ON, intent.getBooleanExtra(EXTRA_ON, false));
++        } else if (ACTION_RELOAD.equals(action)) {
++            startWatchers();
++        } else if (ACTION_SIMULATE.equals(action)) {
++            simulate(intent.getStringExtra(EXTRA_WHAT));
++        }
++        return START_STICKY;
++    }
++
++    // ---- watchers ----
++
++    private void startWatchers() {
++        stopWatchers();
++        Devices.Device gas = Devices.load(this, Roles.GAS);
++        if (gas != null && gas.local()) {
++            SecureRandom r = new SecureRandom();
++            gasWatch = new GasWatch(gas, () -> new TuyaLocal.SocketTransport(gas.ip, 3000), n -> {
++                byte[] b = new byte[n];
++                r.nextBytes(b);
++                return b;
++            }, this);
++            new Thread(gasWatch, "casa-gas").start();
++        }
++        CloudApi.Session session = Devices.loadSession(this);
++        Map<String, String> roleById = new LinkedHashMap<>();
++        for (String role : Devices.ROLES) {
++            Devices.Device d = Devices.load(this, role);
++            if (d != null) roleById.put(d.id, role);
++        }
++        if (session != null && !roleById.isEmpty()) {
++            CloudApi api = CloudApi.forTv(session, renewed -> {
++                try {
++                    Devices.saveSession(this, renewed);
++                } catch (JSONException ignored) {
++                    // the old session stays; the next renewal tries again
++                }
++            });
++            mqtt = new MqttWatch(api, roleById, this);
++            new Thread(mqtt, "casa-cloud").start();
++        }
++    }
++
++    private void stopWatchers() {
++        if (mqtt != null) mqtt.stop();
++        if (gasWatch != null) gasWatch.stop();
++        mqtt = null;
++        gasWatch = null;
++    }
++
++    // ---- reports (from worker threads) ----
++
++    @Override
++    public void report(String role, String dp, Object value) {
++        Roles.Field f = Roles.field(role, dp);
++        if (f != null) main.post(() -> apply(role, f, value));
++    }
++
++    @Override
++    public void cloudLink(boolean up) {
++        main.post(() -> {
++            cloudDownSince = up ? 0 : (cloudDownSince == 0 ? System.currentTimeMillis() : cloudDownSince);
++            if (up) cloudWarned = false;
++            State s = copy();
++            s.cloudConnected = up;
++            publish(s);
++        });
++    }
++
++    @Override
++    public void gas(String status) {
++        main.post(() -> apply(Roles.GAS, Roles.Field.GAS, status));
++    }
++
++    @Override
++    public void gasLink(boolean up) {
++        main.post(() -> {
++            gasDownSince = up ? 0 : (gasDownSince == 0 ? System.currentTimeMillis() : gasDownSince);
++            if (up) gasWarned = false;
++        });
++    }
++
++    /** One reading, on the main thread: the state for the row, and the door and gas messages. */
++    private void apply(String role, Roles.Field f, Object value) {
++        long now = System.currentTimeMillis();
++        State s = copy();
++        switch (f) {
++            case ON:
++                if (Devices.LUZ.equals(role)) s.luz = asBool(value);
++                else s.calefactor = asBool(value);
++                break;
++            case TEMPERATURE:
++                s.temperatureTenths = asInt(value);
++                break;
++            case HUMIDITY:
++                s.humidity = asInt(value);
++                break;
++            case DOOR_OPEN:
++                boolean open = Boolean.TRUE.equals(asBool(value));
++                s.doorOpen = open;
++                if (!doorKnown) {
++                    door.init(open, now);   // the first reading only learns the state
++                    doorKnown = true;
++                } else {
++                    show(door.onDoor(open, now));
++                }
++                scheduleDoorTick();
++                break;
++            case GAS:
++                String gas = String.valueOf(value);
++                s.gas = gas;
++                if ("alarm".equals(gas) && !"alarm".equals(lastGas)) overlay.showGas();
++                if (!"alarm".equals(gas) && "alarm".equals(lastGas)) overlay.gasCleared();
++                lastGas = gas;
++                break;
++            default:
++                break;
++        }
++        publish(s);
++    }
++
++    private void show(DoorAlerts.Alert a) {
++        if (a == null) return;
++        boolean reminder = a.title.startsWith("La puerta sigue");
++        int color = a.closed ? Overlay.GREEN : Overlay.AMBER;
++        int icon = a.closed ? R.drawable.ic_check : reminder ? R.drawable.ic_clock : R.drawable.ic_door;
++        overlay.showSmall(color, icon, a.title, a.sub, a.closed ? 4000 : 5000);
++    }
++
++    private void scheduleDoorTick() {
++        main.removeCallbacks(doorTick);
++        long at = door.nextTickAt();
++        if (at > 0) main.postDelayed(doorTick, Math.max(1000, at - System.currentTimeMillis()));
++    }
++
++    /** A message of its own when the cloud or the gas sensor has been unreachable for five minutes, once per outage. */
++    private void checkHealth() {
++        long now = System.currentTimeMillis();
++        if (mqtt != null && cloudDownSince > 0 && now - cloudDownSince > WARN_AFTER_MS && !cloudWarned) {
++            cloudWarned = true;
++            overlay.showSmall(Overlay.GREY, R.drawable.ic_info, getString(R.string.cloud_down), getString(R.string.cloud_down_sub), 8000);
++        }
++        if (gasWatch != null && gasDownSince > 0 && now - gasDownSince > WARN_AFTER_MS && !gasWarned) {
++            gasWarned = true;
++            overlay.showSmall(Overlay.GREY, R.drawable.ic_info, getString(R.string.gas_down), getString(R.string.gas_down_sub), 8000);
++        }
++    }
++
++    /** ADB-only tests of the messages (ImportActivity --es simulate ...). */
++    private void simulate(String what) {
++        long now = System.currentTimeMillis();
++        if ("gas".equals(what)) {
++            apply(Roles.GAS, Roles.Field.GAS, "alarm");
++        } else if ("gas-normal".equals(what)) {
++            apply(Roles.GAS, Roles.Field.GAS, "normal");
++        } else if ("puerta".equals(what)) {
++            show(new DoorAlerts.Alert(false, "Puerta abierta", "El sensor de la puerta se ha abierto"));
++        } else if ("sigue".equals(what)) {
++            show(new DoorAlerts.Alert(false, "La puerta sigue abierta", "Desde hace 5 min · te lo recuerdo cada 5 min"));
++        } else if ("cerrada".equals(what)) {
++            show(new DoorAlerts.Alert(true, "Puerta cerrada", "Estuvo abierta " + DoorAlerts.duration(7 * 60_000L)));
++        }
++    }
++
++    private State copy() {
++        State o = state, s = new State();
++        s.luz = o.luz;
++        s.calefactor = o.calefactor;
++        s.doorOpen = o.doorOpen;
++        s.temperatureTenths = o.temperatureTenths;
++        s.humidity = o.humidity;
++        s.gas = o.gas;
++        s.cloudConnected = o.cloudConnected;
++        return s;
++    }
++
++    private void publish(State s) {
++        state = s;
++        getContentResolver().notifyChange(NOW, null);
++    }
++
++    private static Boolean asBool(Object v) {
++        if (v instanceof Boolean) return (Boolean) v;
++        if (v == null) return null;
++        String s = String.valueOf(v);
++        return "true".equalsIgnoreCase(s) || "1".equals(s);
++    }
++
++    private static Integer asInt(Object v) {
++        if (v instanceof Number) return ((Number) v).intValue();
++        try {
++            return v == null ? null : Integer.valueOf(String.valueOf(v).trim());
++        } catch (NumberFormatException e) {
++            return null;
++        }
++    }
++
++    @Override
++    public void onDestroy() {
++        stopWatchers();
++        main.removeCallbacksAndMessages(null);
++        overlay.dismissGas();
++        unregisterReceiver(screenOn);
++        super.onDestroy();
++    }
++
++    @Override
++    public IBinder onBind(Intent intent) {
++        return null;
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CloudApi.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CloudApi.java
+new file mode 100644
+index 0000000..17debc0
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CloudApi.java
+@@ -0,0 +1,275 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.ByteArrayOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.net.URLEncoder;
++import java.nio.charset.StandardCharsets;
++import java.security.GeneralSecurityException;
++import java.security.MessageDigest;
++import java.security.SecureRandom;
++import java.util.Base64;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.function.Consumer;
++import java.util.function.LongSupplier;
++import javax.crypto.Cipher;
++import javax.crypto.Mac;
++import javax.crypto.spec.GCMParameterSpec;
++import javax.crypto.spec.SecretKeySpec;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * Tuya's device-sharing cloud (the one Home Assistant uses), ported from tuya_sharing.customerapi and checked against
++ * it (CloudApiTest). Each request: a fresh request id, a secret derived from it and the refresh token, parameters and
++ * body AES-GCM-encrypted into "encdata", an HMAC signature over the headers and the encrypted data. Never calls
++ * /v1.0/m/token/terminal/expire: that logs the TV out.
++ */
++final class CloudApi {
++    static final String CLIENT_ID = "HA_3y9q4ak7g4ephrvke";   // Home Assistant's public registration
++    private static final String NONCE_CHARS = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678";
++    private static final int TIMEOUT_MS = 8000;
++
++    /** How a request leaves the TV: HttpURLConnection there, a fake cloud in the tests. */
++    interface Http {
++        String send(String method, String url, Map<String, String> headers, String body) throws IOException;
++    }
++
++    /** The TV's own session, opened by the PC with a QR code made for the TV (casa_probe.py tv-login). */
++    static final class Session {
++        final String userCode, terminalId, endpoint, accessToken, refreshToken, uid;
++        final long expireAtMs;
++
++        Session(String userCode, String terminalId, String endpoint, String accessToken, String refreshToken, String uid,
++                long expireAtMs) {
++            this.userCode = userCode;
++            this.terminalId = terminalId;
++            this.endpoint = endpoint;
++            this.accessToken = accessToken;
++            this.refreshToken = refreshToken;
++            this.uid = uid;
++            this.expireAtMs = expireAtMs;
++        }
++
++        String toJson() throws JSONException {
++            return new JSONObject().put("userCode", userCode).put("terminalId", terminalId).put("endpoint", endpoint)
++                    .put("accessToken", accessToken).put("refreshToken", refreshToken).put("uid", uid)
++                    .put("expireAtMs", expireAtMs).toString();
++        }
++
++        /** Its own format, or the PC's (the SDK's login result: user_code, terminal_id, endpoint, token{...}). */
++        static Session fromJson(String json) throws JSONException {
++            JSONObject o = new JSONObject(json);
++            if (o.has("token")) {
++                JSONObject t = o.getJSONObject("token");
++                return new Session(o.getString("user_code"), o.getString("terminal_id"), o.getString("endpoint"),
++                        t.getString("access_token"), t.getString("refresh_token"), t.optString("uid", ""),
++                        t.getLong("t") + t.getLong("expire_time") * 1000L);
++            }
++            return new Session(o.getString("userCode"), o.getString("terminalId"), o.getString("endpoint"),
++                    o.getString("accessToken"), o.getString("refreshToken"), o.optString("uid", ""), o.getLong("expireAtMs"));
++        }
++    }
++
++    private Session session;
++    private final Http http;
++    private final LongSupplier clockMs;
++    private final Consumer<Session> onRenewed;
++    private final SecureRandom random = new SecureRandom();
++    private boolean renewing;
++
++    CloudApi(Session session, Http http, LongSupplier clockMs, Consumer<Session> onRenewed) {
++        this.session = session;
++        this.http = http;
++        this.clockMs = clockMs;
++        this.onRenewed = onRenewed;
++    }
++
++    static CloudApi forTv(Session session, Consumer<Session> onRenewed) {
++        return new CloudApi(session, CloudApi::urlConnection, System::currentTimeMillis, onRenewed);
++    }
++
++    /** The devices' details and status ([{id, online, status:[{code, value}]}]). */
++    JSONArray devicesDetail(List<String> ids) throws IOException {
++        Object r = request("GET", "/v1.0/m/life/ha/devices/detail", obj("devIds", String.join(",", ids)), null);
++        if (!(r instanceof JSONArray)) throw new IOException("unexpected devices answer");
++        return (JSONArray) r;
++    }
++
++    /** Fresh MQTT credentials: url, clientId, username, password, expireTime (s), topic.devId.sub. */
++    JSONObject mqttConfig() throws IOException {
++        Object r = request("POST", "/v1.0/m/life/ha/access/config", null, obj("linkId", "casa-tv." + UUID.randomUUID()));
++        if (!(r instanceof JSONObject)) throw new IOException("unexpected MQTT answer");
++        return (JSONObject) r;
++    }
++
++    // ---- requests ----
++
++    private Object request(String method, String path, JSONObject params, JSONObject body) throws IOException {
++        if (!renewing && session.expireAtMs - 60_000L <= clockMs.getAsLong()) renew();
++        String rid = UUID.randomUUID().toString();
++        String hashKey = hashKey(rid, session.refreshToken);
++        String secret = secret(rid, hashKey);
++        String queryEnc = params == null ? "" : encdata(params.toString(), secret, nonce());
++        String bodyEnc = body == null ? "" : encdata(body.toString(), secret, nonce());
++        Map<String, String> headers = new LinkedHashMap<>();
++        headers.put("X-appKey", CLIENT_ID);
++        headers.put("X-requestId", rid);
++        headers.put("X-sid", "");
++        headers.put("X-time", String.valueOf(clockMs.getAsLong()));
++        headers.put("X-token", session.accessToken);
++        headers.put("X-sign", sign(hashKey, headers, queryEnc, bodyEnc));
++        String url = session.endpoint + path + (queryEnc.isEmpty() ? "" : "?encdata=" + URLEncoder.encode(queryEnc, "UTF-8"));
++        String sent;
++        try {
++            sent = body == null ? null : new JSONObject().put("encdata", bodyEnc).toString();
++        } catch (JSONException e) {
++            throw new IOException(e);
++        }
++        String answer = http.send(method, url, headers, sent);
++        try {
++            JSONObject ret = new JSONObject(answer);
++            if (!ret.optBoolean("success")) {
++                throw new IOException("Tuya refused " + path + ": " + ret.optString("msg") + " (" + ret.opt("code") + ")");
++            }
++            Object result = ret.opt("result");
++            if (!(result instanceof String) || ((String) result).isEmpty()) return result;
++            String plain = decryptResult((String) result, secret);
++            Object parsed = plain.trim().startsWith("[") ? new JSONArray(plain) : new JSONObject(plain);
++            if (path.startsWith("/v1.0/m/token/")) ((JSONObject) parsed).put("t", ret.optLong("t"));
++            return parsed;
++        } catch (JSONException e) {
++            throw new IOException("unreadable answer for " + path, e);
++        }
++    }
++
++    /** Renews the access token with the refresh token (customerapi.refresh_access_token_if_need) and saves it. */
++    private void renew() throws IOException {
++        renewing = true;
++        try {
++            JSONObject r = (JSONObject) request("GET", "/v1.0/m/token/" + session.refreshToken, null, null);
++            session = new Session(session.userCode, session.terminalId, session.endpoint, r.getString("accessToken"),
++                    r.getString("refreshToken"), r.optString("uid", session.uid), r.getLong("t") + r.getLong("expireTime") * 1000L);
++            onRenewed.accept(session);
++        } catch (JSONException | ClassCastException e) {
++            throw new IOException("could not renew the Tuya session", e);
++        } finally {
++            renewing = false;
++        }
++    }
++
++    private String nonce() {
++        StringBuilder b = new StringBuilder(12);
++        for (int i = 0; i < 12; i++) b.append(NONCE_CHARS.charAt(random.nextInt(NONCE_CHARS.length())));
++        return b.toString();
++    }
++
++    private static JSONObject obj(String k, String v) {
++        try {
++            return new JSONObject().put(k, v);
++        } catch (JSONException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    // ---- crypto (customerapi._secret_generating, _aes_gcm_encrypt, _aex_gcm_decrypt, _restful_sign) ----
++
++    static String hashKey(String rid, String refreshToken) {
++        try {
++            return hex(MessageDigest.getInstance("MD5").digest((rid + refreshToken).getBytes(StandardCharsets.UTF_8)));
++        } catch (GeneralSecurityException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    static String secret(String rid, String hashKey) {
++        return hex(hmac(rid.getBytes(StandardCharsets.UTF_8), hashKey.getBytes(StandardCharsets.UTF_8))).substring(0, 16);
++    }
++
++    static String encdata(String json, String secret, String nonce) {
++        byte[] sealed = gcm(Cipher.ENCRYPT_MODE, secret, nonce.getBytes(StandardCharsets.UTF_8), json.getBytes(StandardCharsets.UTF_8));
++        Base64.Encoder b64 = Base64.getEncoder();
++        return b64.encodeToString(nonce.getBytes(StandardCharsets.UTF_8)) + b64.encodeToString(sealed);
++    }
++
++    static String decryptResult(String result, String secret) throws IOException {
++        byte[] all = Base64.getDecoder().decode(result);
++        if (all.length < 28) throw new IOException("result too short");
++        byte[] nonce = java.util.Arrays.copyOf(all, 12);
++        try {
++            return new String(gcm(Cipher.DECRYPT_MODE, secret, nonce, java.util.Arrays.copyOfRange(all, 12, all.length)),
++                    StandardCharsets.UTF_8);
++        } catch (IllegalStateException e) {
++            throw new IOException("result does not decrypt", e);
++        }
++    }
++
++    static String sign(String hashKey, Map<String, String> headers, String queryEnc, String bodyEnc) {
++        StringBuilder s = new StringBuilder();
++        for (String k : new String[] {"X-appKey", "X-requestId", "X-sid", "X-time", "X-token"}) {
++            String v = headers.get(k);
++            if (v != null && !v.isEmpty()) s.append(k).append('=').append(v).append("||");
++        }
++        if (s.length() >= 2) s.setLength(s.length() - 2);
++        s.append(queryEnc == null ? "" : queryEnc).append(bodyEnc == null ? "" : bodyEnc);
++        return hex(hmac(hashKey.getBytes(StandardCharsets.UTF_8), s.toString().getBytes(StandardCharsets.UTF_8)));
++    }
++
++    private static byte[] hmac(byte[] key, byte[] data) {
++        try {
++            Mac mac = Mac.getInstance("HmacSHA256");
++            mac.init(new SecretKeySpec(key, "HmacSHA256"));
++            return mac.doFinal(data);
++        } catch (GeneralSecurityException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    private static byte[] gcm(int mode, String secret, byte[] nonce, byte[] data) {
++        try {
++            Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
++            c.init(mode, new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "AES"), new GCMParameterSpec(128, nonce));
++            return c.doFinal(data);
++        } catch (GeneralSecurityException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    private static String hex(byte[] b) {
++        StringBuilder s = new StringBuilder(b.length * 2);
++        for (byte x : b) s.append(Character.forDigit((x >> 4) & 0xF, 16)).append(Character.forDigit(x & 0xF, 16));
++        return s.toString();
++    }
++
++    private static String urlConnection(String method, String url, Map<String, String> headers, String body) throws IOException {
++        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
++        try {
++            c.setRequestMethod(method);
++            c.setConnectTimeout(TIMEOUT_MS);
++            c.setReadTimeout(TIMEOUT_MS);
++            for (Map.Entry<String, String> h : headers.entrySet()) c.setRequestProperty(h.getKey(), h.getValue());
++            if (body != null) {
++                c.setDoOutput(true);
++                c.setRequestProperty("Content-Type", "application/json");
++                try (OutputStream o = c.getOutputStream()) {
++                    o.write(body.getBytes(StandardCharsets.UTF_8));
++                }
++            }
++            InputStream in = c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream();
++            if (in == null) throw new IOException("HTTP " + c.getResponseCode());
++            ByteArrayOutputStream out = new ByteArrayOutputStream();
++            byte[] buf = new byte[8192];
++            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
++            return out.toString("UTF-8");
++        } finally {
++            c.disconnect();
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+index 2f6b99d..4e829de 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+@@ -10,15 +10,18 @@ import org.json.JSONException;
+ import org.json.JSONObject;
+ 
+ /**
+- * The plugs Casa knows, by role ("luz", "calefactor"): id, local key, address on the home network and protocol
+- * version, handed over once from the PC (ImportActivity) and kept in Casa's private preferences only.
++ * The devices Casa knows, by role, handed over once from the PC (ImportActivity) and kept in Casa's private
++ * preferences only: the plugs ("luz", "calefactor") and the gas sensor with what the home network needs (id, local
++ * key, address, protocol); the climate sensor and the door ("clima", "puerta") by id only, as they speak to the
++ * cloud alone. The TV's cloud session lives beside them.
+  */
+ final class Devices {
+     static final String LUZ = "luz", CALEFACTOR = "calefactor";
++    static final String[] ROLES = {LUZ, CALEFACTOR, Roles.GAS, Roles.CLIMA, Roles.PUERTA};
+     private static final Pattern ID = Pattern.compile("[A-Za-z0-9]{10,32}");
+     private static final Pattern KEY = Pattern.compile("[\\x21-\\x7e]{16}");
+     private static final Pattern IPV4 = Pattern.compile("((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)");
+-    private static final String PREFS = "devices";
++    private static final String PREFS = "devices", SESSION = "cloud_session";
+ 
+     static final class Device {
+         final String id, ip, version;
+@@ -26,7 +29,7 @@ final class Devices {
+ 
+         Device(String id, String key, String ip, String version) {
+             this.id = id;
+-            this.key = key.getBytes(StandardCharsets.US_ASCII);
++            this.key = key == null ? new byte[0] : key.getBytes(StandardCharsets.US_ASCII);
+             this.ip = ip;
+             this.version = version;
+         }
+@@ -34,24 +37,34 @@ final class Devices {
+         boolean is35() {
+             return "3.5".equals(version);
+         }
++
++        boolean local() {
++            return ip != null && key.length == 16;
++        }
+     }
+ 
+     private Devices() {
+     }
+ 
+     /**
+-     * The PC's JSON ({"luz": {"id", "key", "ip", "version"}, ...}), checked: unknown roles, odd ids, keys that are not
+-     * 16 printable characters, addresses that are not IPv4 and protocols other than 3.3 and 3.5 are refused.
++     * The PC's JSON ({"luz": {"id", "key", "ip", "version"}, "clima": {"id"}, ...}), checked: odd ids, keys that are not
++     * 16 printable characters, addresses that are not IPv4 and protocols the role does not speak are refused.
+      */
+     static Map<String, Device> parse(String json) throws JSONException {
+         JSONObject all = new JSONObject(json);
+         Map<String, Device> out = new LinkedHashMap<>();
+-        for (String role : new String[] {LUZ, CALEFACTOR}) {
++        for (String role : ROLES) {
+             JSONObject d = all.optJSONObject(role);
+             if (d == null) continue;
+-            String id = d.getString("id"), key = d.getString("key"), ip = d.getString("ip"), version = d.getString("version");
+-            if (!ID.matcher(id).matches() || !KEY.matcher(key).matches() || !IPV4.matcher(ip).matches()
+-                    || !("3.3".equals(version) || "3.5".equals(version))) {
++            String id = d.getString("id");
++            if (!ID.matcher(id).matches()) throw new JSONException("invalid id for " + role);
++            if (Roles.CLIMA.equals(role) || Roles.PUERTA.equals(role)) {
++                out.put(role, new Device(id, null, null, null));
++                continue;
++            }
++            String key = d.getString("key"), ip = d.getString("ip"), version = d.getString("version");
++            boolean versionOk = Roles.GAS.equals(role) ? "3.4".equals(version) : "3.3".equals(version) || "3.5".equals(version);
++            if (!KEY.matcher(key).matches() || !IPV4.matcher(ip).matches() || !versionOk) {
+                 throw new JSONException("invalid device for " + role);
+             }
+             out.put(role, new Device(id, key, ip, version));
+@@ -63,14 +76,14 @@ final class Devices {
+     static void save(Context ctx, String json) throws JSONException {
+         Map<String, Device> parsed = parse(json);
+         JSONObject all = new JSONObject(json);
+-        SharedPreferences.Editor e = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
++        SharedPreferences.Editor e = prefs(ctx).edit();
+         for (String role : parsed.keySet()) e.putString(role, all.getJSONObject(role).toString());
+         e.apply();
+     }
+ 
+     /** The stored device for a role, or null when the PC has not configured it. */
+     static Device load(Context ctx, String role) {
+-        String s = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(role, null);
++        String s = prefs(ctx).getString(role, null);
+         if (s == null) return null;
+         try {
+             return parse(new JSONObject().put(role, new JSONObject(s)).toString()).get(role);
+@@ -78,4 +91,21 @@ final class Devices {
+             return null;
+         }
+     }
++
++    static void saveSession(Context ctx, CloudApi.Session session) throws JSONException {
++        prefs(ctx).edit().putString(SESSION, session.toJson()).apply();
++    }
++
++    static CloudApi.Session loadSession(Context ctx) {
++        String s = prefs(ctx).getString(SESSION, null);
++        try {
++            return s == null ? null : CloudApi.Session.fromJson(s);
++        } catch (JSONException e) {
++            return null;
++        }
++    }
++
++    private static SharedPreferences prefs(Context ctx) {
++        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
++    }
+ }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
+new file mode 100644
+index 0000000..2714fea
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorAlerts.java
+@@ -0,0 +1,76 @@
++package io.github.ignaciopd3.casa;
++
++/**
++ * What the door sensor's changes should say: "Puerta abierta", then "La puerta sigue abierta" every five minutes
++ * while it stays open (and when the TV is switched on with it open), and "Puerta cerrada" with how long it was open.
++ * The first reading only learns the state; repeated reports of the same state say nothing.
++ */
++class DoorAlerts {
++    static final long REMIND_MS = 5 * 60_000L;
++
++    static final class Alert {
++        final boolean closed;
++        final String title, sub;
++
++        Alert(boolean closed, String title, String sub) {
++            this.closed = closed;
++            this.title = title;
++            this.sub = sub;
++        }
++    }
++
++    private Boolean open;
++    private long openedAt, lastReminderAt;
++
++    /** The state at start-up (from the cloud), without a message. */
++    void init(boolean isOpen, long now) {
++        open = isOpen;
++        openedAt = now;
++        lastReminderAt = now;
++    }
++
++    Alert onDoor(boolean isOpen, long now) {
++        if (open == null) {
++            init(isOpen, now);
++            return null;
++        }
++        if (open == isOpen) return null;
++        open = isOpen;
++        if (isOpen) {
++            openedAt = now;
++            lastReminderAt = now;
++            return new Alert(false, "Puerta abierta", "El sensor de la puerta se ha abierto");
++        }
++        return new Alert(true, "Puerta cerrada", "Estuvo abierta " + duration(now - openedAt));
++    }
++
++    /** Called at nextTickAt(): the five-minute reminder while the door stays open. */
++    Alert onTick(long now) {
++        if (!Boolean.TRUE.equals(open) || now - lastReminderAt < REMIND_MS) return null;
++        lastReminderAt = now;
++        return stillOpen(now);
++    }
++
++    Alert onScreenOn(long now) {
++        return Boolean.TRUE.equals(open) ? stillOpen(now) : null;
++    }
++
++    /** When the next reminder is due, or -1 while the door is closed. */
++    long nextTickAt() {
++        return Boolean.TRUE.equals(open) ? lastReminderAt + REMIND_MS : -1;
++    }
++
++    private Alert stillOpen(long now) {
++        long min = Math.max(1, (now - openedAt) / 60_000L);
++        return new Alert(false, "La puerta sigue abierta", "Desde hace " + minutes(min) + " · te lo recuerdo cada 5 min");
++    }
++
++    static String duration(long ms) {
++        long min = ms / 60_000L;
++        return min < 1 ? "menos de un minuto" : minutes(min);
++    }
++
++    private static String minutes(long min) {
++        return min < 60 ? min + " min" : (min / 60) + " h" + (min % 60 == 0 ? "" : " " + (min % 60) + " min");
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Frames.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Frames.java
+index d3219f8..c460b64 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Frames.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Frames.java
+@@ -22,7 +22,7 @@ import javax.crypto.spec.SecretKeySpec;
+  */
+ final class Frames {
+     static final int SESS_KEY_NEG_START = 3, SESS_KEY_NEG_RESP = 4, SESS_KEY_NEG_FINISH = 5;
+-    static final int CONTROL = 7, STATUS = 8, DP_QUERY = 10, CONTROL_NEW = 13, DP_QUERY_NEW = 16;
++    static final int CONTROL = 7, STATUS = 8, HEART_BEAT = 9, DP_QUERY = 10, CONTROL_NEW = 13, DP_QUERY_NEW = 16;
+ 
+     private static final int PREFIX_55AA = 0x000055AA, SUFFIX_55AA = 0x0000AA55;
+     private static final int PREFIX_6699 = 0x00006699, SUFFIX_6699 = 0x00009966;
+@@ -82,6 +82,62 @@ final class Frames {
+         }
+     }
+ 
++    // ---- 3.4 (the gas sensor) ----
++
++    /** "3.4" and 12 zero bytes in front of a command that carries the protocol header (CONTROL_NEW does). */
++    static byte[] withVersion34(byte[] json) {
++        return concat(versionHeader("3.4"), json);
++    }
++
++    /** A 3.4 frame: raw AES-ECB-encrypted under the key (the local key while negotiating, then the session key), with
++     *  an HMAC-SHA256 of everything before it instead of a CRC. */
++    static byte[] encode34(int seq, int cmd, byte[] raw, byte[] key) {
++        byte[] payload = aesEcb(Cipher.ENCRYPT_MODE, key, raw);
++        ByteBuffer b = ByteBuffer.allocate(16 + payload.length + 36);
++        b.putInt(PREFIX_55AA).putInt(seq).putInt(cmd).putInt(payload.length + 36).put(payload);
++        b.put(hmac(key, Arrays.copyOf(b.array(), 16 + payload.length))).putInt(SUFFIX_55AA);
++        return b.array();
++    }
++
++    /** A 3.4 frame from the device: checks the HMAC, strips the return code, decrypts and drops any version header. */
++    static Message decode34(byte[] frame, byte[] key) throws IOException {
++        ByteBuffer b = ByteBuffer.wrap(frame);
++        if (frame.length < 16 + 4 + 36 || b.getInt(0) != PREFIX_55AA) throw new IOException("not a 55AA frame");
++        int seq = b.getInt(4), cmd = b.getInt(8), len = b.getInt(12);
++        if (len < 40 || 16 + len > frame.length) throw new IOException("bad 3.4 length");
++        int end = 16 + len;
++        if (b.getInt(end - 4) != SUFFIX_55AA) throw new IOException("bad 3.4 suffix");
++        if (!java.security.MessageDigest.isEqual(hmac(key, Arrays.copyOf(frame, end - 36)),
++                Arrays.copyOfRange(frame, end - 36, end - 4))) {
++            throw new IOException("bad 3.4 hmac");
++        }
++        int retcode = b.getInt(16);
++        byte[] enc = Arrays.copyOfRange(frame, 20, end - 36);
++        byte[] payload;
++        try {
++            payload = enc.length == 0 ? enc : aesEcb(Cipher.DECRYPT_MODE, key, enc);
++        } catch (IllegalStateException e) {
++            throw new IOException("3.4 payload does not decrypt", e);
++        }
++        if (payload.length >= VERSION_HEADER && payload[0] == '3' && payload[1] == '.') {
++            payload = Arrays.copyOfRange(payload, VERSION_HEADER, payload.length);
++        }
++        return new Message(seq, cmd, retcode, payload);
++    }
++
++    /** The 3.4 session key: local XOR remote nonce, encrypted with the local key (one ECB block, no padding). */
++    static byte[] sessionKey34(byte[] localKey, byte[] localNonce, byte[] remoteNonce) {
++        byte[] x = new byte[16];
++        for (int i = 0; i < 16; i++) x[i] = (byte) (localNonce[i] ^ remoteNonce[i]);
++        try {
++            Cipher c = Cipher.getInstance("AES/ECB/NoPadding");
++            c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(localKey, "AES"));
++            return c.doFinal(x);
++        } catch (GeneralSecurityException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
+     // ---- 3.5 ----
+ 
+     /** "3.5" and 12 zero bytes in front of a command that carries the protocol header (CONTROL_NEW does). */
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/GasWatch.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/GasWatch.java
+new file mode 100644
+index 0000000..651dc9c
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/GasWatch.java
+@@ -0,0 +1,106 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.IOException;
++import java.net.SocketTimeoutException;
++import java.nio.charset.StandardCharsets;
++import java.util.Arrays;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++
++/**
++ * Keeps a connection open to the gas sensor on the home network (protocol 3.4) and reports its state the moment it
++ * changes, with no internet involved. A heartbeat every 9 s keeps the sensor talking; any error closes the
++ * connection and retries after 10 s.
++ */
++final class GasWatch implements Runnable {
++    private static final Pattern GAS = Pattern.compile("\"2\"\s*:\s*\"([a-z]+)\"");
++    private static final long HEARTBEAT_MS = 9000, RETRY_MS = 10_000;
++
++    interface Listener {
++        void gas(String status);
++
++        void gasLink(boolean up);
++    }
++
++    interface Opener {
++        TuyaLocal.Transport open() throws IOException;
++    }
++
++    private final Devices.Device device;
++    private final Opener opener;
++    private final TuyaLocal.Random random;
++    private final Listener listener;
++    private volatile boolean stopped;
++
++    GasWatch(Devices.Device device, Opener opener, TuyaLocal.Random random, Listener listener) {
++        this.device = device;
++        this.opener = opener;
++        this.random = random;
++        this.listener = listener;
++    }
++
++    void stop() {
++        stopped = true;
++    }
++
++    @Override
++    public void run() {
++        while (!stopped) {
++            try (TuyaLocal.Transport t = opener.open()) {
++                byte[] session = negotiate34(t, device.key, random);
++                int seq = 3;
++                t.write(Frames.encode34(seq++, Frames.DP_QUERY_NEW, "{}".getBytes(StandardCharsets.UTF_8), session));
++                listener.gasLink(true);
++                long nextBeat = System.currentTimeMillis() + HEARTBEAT_MS;
++                byte[] beat = ("{\"gwId\":\"" + device.id + "\",\"devId\":\"" + device.id + "\"}").getBytes(StandardCharsets.UTF_8);
++                while (!stopped) {
++                    byte[] f = null;
++                    try {
++                        f = t.readFrame();
++                    } catch (SocketTimeoutException idle) {
++                        // nothing new: time for a heartbeat?
++                    }
++                    if (f != null) {
++                        String gas = gasStatus(Frames.decode34(f, session).payload);
++                        if (gas != null) listener.gas(gas);
++                    }
++                    if (System.currentTimeMillis() >= nextBeat) {
++                        t.write(Frames.encode34(seq++, Frames.HEART_BEAT, beat, session));
++                        nextBeat = System.currentTimeMillis() + HEARTBEAT_MS;
++                    }
++                }
++            } catch (IOException | RuntimeException e) {
++                listener.gasLink(false);
++                sleep(RETRY_MS);
++            }
++        }
++    }
++
++    /** The 3.4 handshake: nonces and HMACs as in 3.5, but ECB-encrypted, and the session key is one ECB block. */
++    static byte[] negotiate34(TuyaLocal.Transport t, byte[] key, TuyaLocal.Random random) throws IOException {
++        byte[] local = random.bytes(16);
++        t.write(Frames.encode34(1, Frames.SESS_KEY_NEG_START, local, key));
++        Frames.Message offer = Frames.decode34(t.readFrame(), key);
++        if (offer.cmd != Frames.SESS_KEY_NEG_RESP || offer.payload.length < 48) throw new IOException("no session offer");
++        byte[] remote = Arrays.copyOfRange(offer.payload, 0, 16);
++        if (!Arrays.equals(Frames.hmac(key, local), Arrays.copyOfRange(offer.payload, 16, 48))) {
++            throw new IOException("session offer failed its HMAC (wrong local key?)");
++        }
++        t.write(Frames.encode34(2, Frames.SESS_KEY_NEG_FINISH, Frames.hmac(key, remote), key));
++        return Frames.sessionKey34(key, local, remote);
++    }
++
++    /** "alarm" or "normal" from a status payload (data point 2), or null when it does not carry it. */
++    static String gasStatus(byte[] payload) {
++        Matcher m = GAS.matcher(new String(payload, StandardCharsets.UTF_8));
++        return m.find() ? m.group(1) : null;
++    }
++
++    private void sleep(long ms) {
++        try {
++            Thread.sleep(ms);
++        } catch (InterruptedException e) {
++            stopped = true;
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+index b1e14bc..d0ca6fd 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+@@ -1,28 +1,51 @@
+ package io.github.ignaciopd3.casa;
+ 
+ import android.app.Activity;
++import android.content.Intent;
+ import android.os.Bundle;
+ import android.util.Base64;
+ import android.widget.Toast;
+ import java.nio.charset.StandardCharsets;
+ 
+ /**
+- * Takes the plugs' configuration from the PC (tools/casa_probe.py push): {@code am start -n
+- * io.github.ignaciopd3.casa/.ImportActivity --es b64 <base64 JSON>}. Guarded by DUMP in the manifest, so only the ADB
+- * shell and the system can open it. Shows how many devices it kept and closes.
++ * Takes Casa's configuration from the PC (tools/casa_probe.py): {@code --es b64 <devices JSON>} and
++ * {@code --es session_b64 <cloud session JSON>}, both base64. {@code --es simulate gas|gas-normal|puerta|sigue|cerrada}
++ * shows a message without the real event, to test the screen. Guarded by DUMP in the manifest, so only the ADB shell
++ * and the system can open it.
+  */
+ public class ImportActivity extends Activity {
+     @Override
+     protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+-        String b64 = getIntent().getStringExtra("b64");
++        Intent in = getIntent();
++        String simulate = in.getStringExtra("simulate");
++        if (simulate != null) {
++            startForegroundService(new Intent(this, CasaService.class).setAction(CasaService.ACTION_SIMULATE)
++                    .putExtra(CasaService.EXTRA_WHAT, simulate));
++            finish();
++            return;
++        }
+         try {
+-            String json = new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8);
+-            Devices.save(this, json);
+-            Toast.makeText(this, getString(R.string.imported, Devices.parse(json).size()), Toast.LENGTH_LONG).show();
+-        } catch (Exception e) {   // missing extra, bad base64 or a configuration Devices refuses
++            int kept = 0;
++            String devices = in.getStringExtra("b64");
++            if (devices != null) {
++                String json = decode(devices);
++                Devices.save(this, json);
++                kept += Devices.parse(json).size();
++            }
++            String session = in.getStringExtra("session_b64");
++            if (session != null) Devices.saveSession(this, CloudApi.Session.fromJson(decode(session)));
++            if (devices == null && session == null) throw new IllegalArgumentException("nothing to import");
++            startForegroundService(new Intent(this, CasaService.class).setAction(CasaService.ACTION_RELOAD));
++            Toast.makeText(this, session != null && devices == null ? getString(R.string.session_saved)
++                    : getString(R.string.imported, kept), Toast.LENGTH_LONG).show();
++        } catch (Exception e) {   // bad base64 or a configuration Devices refuses
+             Toast.makeText(this, R.string.import_failed, Toast.LENGTH_LONG).show();
+         }
+         finish();
+     }
++
++    private static String decode(String b64) {
++        return new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8);
++    }
+ }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/MqttWatch.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/MqttWatch.java
+new file mode 100644
+index 0000000..9e5c7a9
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/MqttWatch.java
+@@ -0,0 +1,134 @@
++package io.github.ignaciopd3.casa;
++
++import java.nio.charset.StandardCharsets;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.TimeUnit;
++import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
++import org.eclipse.paho.client.mqttv3.MqttCallback;
++import org.eclipse.paho.client.mqttv3.MqttClient;
++import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
++import org.eclipse.paho.client.mqttv3.MqttMessage;
++import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++/**
++ * The cloud side: the devices' status at start-up, then Tuya's MQTT reports as they happen (tuya_sharing.mq). The
++ * credentials expire, so it reconnects with fresh ones a minute before; a dropped connection retries with a growing
++ * pause (up to a minute), so a broken internet never turns into a request storm.
++ */
++final class MqttWatch implements Runnable {
++    interface Listener {
++        void report(String role, String dp, Object value);
++
++        void cloudLink(boolean up);
++    }
++
++    private final CloudApi api;
++    private final Map<String, String> roleById;
++    private final Listener listener;
++    private volatile boolean stopped;
++    private volatile CountDownLatch done;
++
++    MqttWatch(CloudApi api, Map<String, String> roleById, Listener listener) {
++        this.api = api;
++        this.roleById = roleById;
++        this.listener = listener;
++    }
++
++    void stop() {
++        stopped = true;
++        CountDownLatch d = done;
++        if (d != null) d.countDown();
++    }
++
++    @Override
++    public void run() {
++        long backoff = 1000;
++        while (!stopped) {
++            MqttClient client = null;
++            try {
++                List<String> ids = new ArrayList<>(roleById.keySet());
++                JSONArray devices = api.devicesDetail(ids);
++                for (int i = 0; i < devices.length(); i++) {
++                    JSONObject d = devices.getJSONObject(i);
++                    String role = roleById.get(d.optString("id"));
++                    JSONArray status = d.optJSONArray("status");
++                    for (int j = 0; role != null && status != null && j < status.length(); j++) {
++                        JSONObject s = status.getJSONObject(j);
++                        if (s.has("code") && s.has("value")) listener.report(role, s.getString("code"), s.get("value"));
++                    }
++                }
++                JSONObject cfg = api.mqttConfig();
++                done = new CountDownLatch(1);
++                CountDownLatch lost = done;
++                client = new MqttClient(cfg.getString("url"), cfg.getString("clientId"), new MemoryPersistence());
++                client.setCallback(new MqttCallback() {
++                    @Override
++                    public void connectionLost(Throwable cause) {
++                        lost.countDown();
++                    }
++
++                    @Override
++                    public void messageArrived(String topic, MqttMessage message) {
++                        for (Reports.Change c : Reports.parse(new String(message.getPayload(), StandardCharsets.UTF_8))) {
++                            String role = roleById.get(c.devId);
++                            if (role != null) listener.report(role, c.dp, c.value);
++                        }
++                    }
++
++                    @Override
++                    public void deliveryComplete(IMqttDeliveryToken token) {
++                    }
++                });
++                MqttConnectOptions o = new MqttConnectOptions();
++                o.setUserName(cfg.getString("username"));
++                o.setPassword(cfg.getString("password").toCharArray());
++                o.setCleanSession(true);
++                o.setAutomaticReconnect(false);
++                o.setKeepAliveInterval(60);
++                o.setConnectionTimeout(15);
++                client.connect(o);
++                String sub = cfg.getJSONObject("topic").getJSONObject("devId").getString("sub");
++                for (String id : ids) {
++                    String base = sub.replace("{devId}", id);
++                    client.subscribe(base + "/pen", 0);   // devices that also speak LAN report here, by data point
++                    client.subscribe(base + "/sta", 0);
++                }
++                listener.cloudLink(true);
++                long renewIn = Math.max(60, cfg.optLong("expireTime", 7200) - 60);
++                boolean dropped = lost.await(renewIn, TimeUnit.SECONDS);
++                backoff = dropped && !stopped ? Math.min(backoff * 2, 60_000) : 1000;
++                if (dropped && !stopped) listener.cloudLink(false);
++            } catch (Exception e) {
++                listener.cloudLink(false);
++                pause(backoff);
++                backoff = Math.min(backoff * 2, 60_000);
++            } finally {
++                if (client != null) {
++                    try {
++                        client.disconnectForcibly(1000, 1000);
++                    } catch (Exception ignored) {
++                        // already gone
++                    }
++                    try {
++                        client.close();
++                    } catch (Exception ignored) {
++                        // already closed
++                    }
++                }
++            }
++        }
++    }
++
++    private void pause(long ms) {
++        try {
++            Thread.sleep(ms);
++        } catch (InterruptedException e) {
++            stopped = true;
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
+new file mode 100644
+index 0000000..0b9ec23
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Overlay.java
+@@ -0,0 +1,202 @@
++package io.github.ignaciopd3.casa;
++
++import android.animation.ObjectAnimator;
++import android.animation.ValueAnimator;
++import android.content.Context;
++import android.graphics.Color;
++import android.graphics.PixelFormat;
++import android.graphics.Typeface;
++import android.graphics.drawable.GradientDrawable;
++import android.media.AudioManager;
++import android.media.ToneGenerator;
++import android.os.Handler;
++import android.os.Looper;
++import android.provider.Settings;
++import android.view.Gravity;
++import android.view.KeyEvent;
++import android.view.View;
++import android.view.WindowManager;
++import android.widget.FrameLayout;
++import android.widget.ImageView;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++
++/**
++ * The messages over whatever is on screen, in the top-centre capsule the owner chose: the door ones are small, a
++ * little see-through and never take the remote; the gas alarm is large and red over a darkened screen, beeps, and
++ * stays until OK (it takes the remote focus for that). Needs "display over other apps" (granted from the PC); without
++ * it a plain toast says the same.
++ */
++final class Overlay {
++    static final int AMBER = 0xFFFFB340, GREEN = 0xFF30D158, RED = 0xFFFF453A, GREY = 0xFF98A1B0;
++    private static final long BEEP_EVERY_MS = 3000;
++
++    private final Context ctx;
++    private final WindowManager wm;
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final float dp;
++    private View small;
++    private final Runnable hideSmall = this::removeSmall;
++    private FrameLayout gas;
++    private TextView gasSub;
++    private ToneGenerator tone;
++    private final Runnable beep = new Runnable() {
++        @Override
++        public void run() {
++            if (tone != null) tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 600);
++            main.postDelayed(this, BEEP_EVERY_MS);
++        }
++    };
++
++    Overlay(Context ctx) {
++        this.ctx = ctx;
++        this.wm = ctx.getSystemService(WindowManager.class);
++        this.dp = ctx.getResources().getDisplayMetrics().density;
++    }
++
++    /** A door or connection message: small, top centre, gone after a few seconds; replaces the previous one. */
++    void showSmall(int color, int icon, String title, String sub, long forMs) {
++        if (!Settings.canDrawOverlays(ctx)) {
++            Toast.makeText(ctx, title + " · " + sub, Toast.LENGTH_LONG).show();
++            return;
++        }
++        removeSmall();
++        small = capsule(color, icon, title, sub, false);
++        small.setAlpha(0.94f);
++        WindowManager.LayoutParams lp = params(false);
++        lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
++        lp.y = px(16);
++        wm.addView(small, lp);
++        main.postDelayed(hideSmall, forMs);
++    }
++
++    /** The gas alarm: darkened screen, large red capsule that pulses, a beep every 3 s, until OK. */
++    void showGas() {
++        if (gas != null) return;
++        if (!Settings.canDrawOverlays(ctx)) {
++            Toast.makeText(ctx, "Alarma de gas: el sensor de gas se ha activado", Toast.LENGTH_LONG).show();
++            return;
++        }
++        gas = new FrameLayout(ctx);
++        gas.setBackgroundColor(0x73000000);
++        LinearLayout box = capsule(RED, R.drawable.ic_flame, "Alarma de gas", "El sensor de gas se ha activado · pulsa OK para cerrar", true);
++        gasSub = (TextView) box.findViewWithTag("sub");
++        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
++                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
++        flp.topMargin = px(20);
++        gas.addView(box, flp);
++        ObjectAnimator pulse = ObjectAnimator.ofFloat(box, View.ALPHA, 1f, 0.7f);
++        pulse.setDuration(800);
++        pulse.setRepeatMode(ValueAnimator.REVERSE);
++        pulse.setRepeatCount(ValueAnimator.INFINITE);
++        pulse.start();
++        gas.setFocusable(true);
++        gas.setFocusableInTouchMode(true);
++        gas.setOnKeyListener((v, code, ev) -> {
++            boolean ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
++                    || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_BACK;
++            if (ok && ev.getAction() == KeyEvent.ACTION_UP) dismissGas();
++            return ok;
++        });
++        WindowManager.LayoutParams lp = params(true);
++        lp.width = WindowManager.LayoutParams.MATCH_PARENT;
++        lp.height = WindowManager.LayoutParams.MATCH_PARENT;
++        wm.addView(gas, lp);
++        gas.requestFocus();
++        try {
++            tone = new ToneGenerator(AudioManager.STREAM_MUSIC, ToneGenerator.MAX_VOLUME);
++            main.post(beep);
++        } catch (RuntimeException noAudio) {
++            tone = null;   // no tone on this set: the screen still says it
++        }
++    }
++
++    /** The sensor is back to normal: stop the beep, keep the message until OK. */
++    void gasCleared() {
++        stopBeep();
++        if (gasSub != null) gasSub.setText("La alarma se ha parado · pulsa OK para cerrar");
++    }
++
++    void dismissGas() {
++        stopBeep();
++        if (gas != null) {
++            wm.removeView(gas);
++            gas = null;
++            gasSub = null;
++        }
++    }
++
++    private void stopBeep() {
++        main.removeCallbacks(beep);
++        if (tone != null) {
++            tone.release();
++            tone = null;
++        }
++    }
++
++    private void removeSmall() {
++        main.removeCallbacks(hideSmall);
++        if (small != null) {
++            wm.removeView(small);
++            small = null;
++        }
++    }
++
++    private WindowManager.LayoutParams params(boolean focusable) {
++        int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
++        if (!focusable) flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
++        return new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
++                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT);
++    }
++
++    /** Dark glass capsule: a coloured disc with the icon, then the title over a quieter line. */
++    private LinearLayout capsule(int color, int icon, String title, String sub, boolean big) {
++        LinearLayout row = new LinearLayout(ctx);
++        row.setOrientation(LinearLayout.HORIZONTAL);
++        row.setGravity(Gravity.CENTER_VERTICAL);
++        int h = px(big ? 60 : 42);
++        GradientDrawable bg = new GradientDrawable();
++        bg.setColor(big ? 0xE6140606 : 0xD1080A10);
++        bg.setCornerRadius(h / 2f);
++        bg.setStroke(Math.max(1, px(big ? 2 : 1)), big ? color : (color & 0x00FFFFFF) | 0x99000000);
++        row.setBackground(bg);
++        row.setMinimumHeight(h);
++        row.setPadding(px(big ? 12 : 8), px(6), px(big ? 26 : 18), px(6));
++
++        FrameLayout disc = new FrameLayout(ctx);
++        GradientDrawable circle = new GradientDrawable();
++        circle.setShape(GradientDrawable.OVAL);
++        circle.setColor(color);
++        disc.setBackground(circle);
++        ImageView img = new ImageView(ctx);
++        img.setImageResource(icon);
++        img.setColorFilter(0xFF1B1205);
++        int d = px(big ? 40 : 28);
++        disc.addView(img, new FrameLayout.LayoutParams(d * 6 / 10, d * 6 / 10, Gravity.CENTER));
++        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(d, d);
++        dlp.setMarginEnd(px(big ? 14 : 10));
++        row.addView(disc, dlp);
++
++        LinearLayout texts = new LinearLayout(ctx);
++        texts.setOrientation(LinearLayout.VERTICAL);
++        TextView t = new TextView(ctx);
++        t.setText(title);
++        t.setTextColor(Color.WHITE);
++        t.setTextSize(big ? 22 : 15);
++        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
++        TextView s = new TextView(ctx);
++        s.setText(sub);
++        s.setTag("sub");
++        s.setTextColor(0xBFFFFFFF);
++        s.setTextSize(big ? 14 : 11);
++        texts.addView(t);
++        texts.addView(s);
++        row.addView(texts);
++        return row;
++    }
++
++    private int px(float dps) {
++        return Math.round(dps * dp);
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Reports.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Reports.java
+new file mode 100644
+index 0000000..c6bce0e
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Reports.java
+@@ -0,0 +1,44 @@
++package io.github.ignaciopd3.casa;
++
++import java.util.ArrayList;
++import java.util.List;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/** Tuya's MQTT device reports (protocol 4): each changed data point, by number (devices that also speak LAN) or code. */
++final class Reports {
++    static final class Change {
++        final String devId, dp;
++        final Object value;
++
++        Change(String devId, String dp, Object value) {
++            this.devId = devId;
++            this.dp = dp;
++            this.value = value;
++        }
++    }
++
++    private Reports() {
++    }
++
++    static List<Change> parse(String json) {
++        List<Change> out = new ArrayList<>();
++        try {
++            JSONObject o = new JSONObject(json);
++            if (o.optInt("protocol") != 4) return out;
++            JSONObject data = o.getJSONObject("data");
++            String devId = data.getString("devId");
++            JSONArray status = data.optJSONArray("status");
++            for (int i = 0; status != null && i < status.length(); i++) {
++                JSONObject s = status.getJSONObject(i);
++                if (!s.has("value")) continue;
++                if (s.has("dpId")) out.add(new Change(devId, String.valueOf(s.get("dpId")), s.get("value")));
++                else if (s.has("code")) out.add(new Change(devId, s.getString("code"), s.get("value")));
++            }
++        } catch (JSONException e) {
++            // Not a report Casa understands: nothing changes.
++        }
++        return out;
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Roles.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Roles.java
+new file mode 100644
+index 0000000..72d8d54
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Roles.java
+@@ -0,0 +1,31 @@
++package io.github.ignaciopd3.casa;
++
++/**
++ * Which data point means what for each of Casa's devices, by number (local and MQTT for LAN devices) or by code
++ * (cloud status). From the devices' own specification (tuya_sharing local_strategy), read on 2026-11-19.
++ */
++final class Roles {
++    static final String CLIMA = "clima", PUERTA = "puerta", GAS = "gas";
++
++    enum Field { ON, TEMPERATURE, HUMIDITY, DOOR_OPEN, GAS }
++
++    private Roles() {
++    }
++
++    static Field field(String role, String dp) {
++        switch (role) {
++            case Devices.LUZ:
++            case Devices.CALEFACTOR:
++                return "1".equals(dp) || "switch_1".equals(dp) ? Field.ON : null;
++            case CLIMA:
++                if ("1".equals(dp) || "va_temperature".equals(dp)) return Field.TEMPERATURE;
++                return "2".equals(dp) || "va_humidity".equals(dp) || "humidity_value".equals(dp) ? Field.HUMIDITY : null;
++            case PUERTA:
++                return "1".equals(dp) || "doorcontact_state".equals(dp) ? Field.DOOR_OPEN : null;
++            case GAS:
++                return "2".equals(dp) || "gas_sensor_status".equals(dp) ? Field.GAS : null;
++            default:
++                return null;
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
+new file mode 100644
+index 0000000..3364302
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/State.java
+@@ -0,0 +1,19 @@
++package io.github.ignaciopd3.casa;
++
++/** What Casa knows right now, as the launcher's row shows it. Unknown readings show as "—". */
++final class State {
++    Boolean luz, calefactor, doorOpen;
++    Integer temperatureTenths, humidity;
++    String gas;
++    boolean cloudConnected;
++
++    static String temperature(Integer tenths) {
++        if (tenths == null) return "—";
++        int abs = Math.abs(tenths);
++        return (tenths < 0 ? "-" : "") + (abs / 10) + "," + (abs % 10) + "°";
++    }
++
++    static String humidity(Integer percent) {
++        return percent == null ? "—" : percent + " %";
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+index 6b7a2ee..392c5ca 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+@@ -37,7 +37,7 @@ public class ToggleService extends Service {
+         Devices.Device d = role == null ? null : Devices.load(this, role);
+         if (d == null) return R.string.not_configured;
+         try (TuyaLocal t = TuyaLocal.connect(d)) {
+-            t.toggle();
++            CasaService.reportSwitch(this, role, t.toggle());
+             return 0;
+         } catch (IOException | RuntimeException e) {
+             return Devices.LUZ.equals(role) ? R.string.light_failed : R.string.heater_failed;
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TuyaLocal.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TuyaLocal.java
+index 4e6bd72..2eacb3e 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TuyaLocal.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TuyaLocal.java
+@@ -144,8 +144,12 @@ final class TuyaLocal implements Closeable {
+         private final DataInputStream in;
+ 
+         SocketTransport(String ip) throws IOException {
++            this(ip, READ_MS);
++        }
++
++        SocketTransport(String ip, int readTimeoutMs) throws IOException {
+             socket.connect(new InetSocketAddress(ip, PORT), CONNECT_MS);
+-            socket.setSoTimeout(READ_MS);
++            socket.setSoTimeout(readTimeoutMs);
+             out = socket.getOutputStream();
+             InputStream raw = socket.getInputStream();
+             in = new DataInputStream(raw);
+diff --git a/addons/casa/app/src/main/res/drawable/ic_bulb.xml b/addons/casa/app/src/main/res/drawable/ic_bulb.xml
+new file mode 100644
+index 0000000..d7171a9
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_bulb.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A light bulb. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M9,17.5h6M10,20.5h4M12,3.5a5.5,5.5 0,0 0,-3.2,10c0.5,0.4 0.8,1 0.8,1.6v0.4h4.8v-0.4c0,-0.6 0.3,-1.2 0.8,-1.6A5.5,5.5 0,0 0,12,3.5z" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_check.xml b/addons/casa/app/src/main/res/drawable/ic_check.xml
+new file mode 100644
+index 0000000..5924d96
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_check.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A tick. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2.4" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M5,12.5l4.5,4.5L19,7.5" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_clock.xml b/addons/casa/app/src/main/res/drawable/ic_clock.xml
+new file mode 100644
+index 0000000..541202c
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_clock.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A clock. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M12,3.5a8.5,8.5 0,1 0,0.01 0zM12,7.5v4.8l3,2" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_door.xml b/addons/casa/app/src/main/res/drawable/ic_door.xml
+new file mode 100644
+index 0000000..450fe5a
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_door.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A door. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M6.5,20.5V4.5q0,-1 1,-1h9q1,0 1,1v16M4.5,20.5h15M14.5,12.5h0.01" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_flame.xml b/addons/casa/app/src/main/res/drawable/ic_flame.xml
+new file mode 100644
+index 0000000..1fbc02b
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_flame.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A flame. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M12,3.5c0.6,2.8 4.5,4.8 4.5,9.5a4.5,4.5 0,0 1,-9 0c0,-2 0.9,-3.4 2,-4.4c0,1.9 0.9,2.9 2,2.9c0,-2.9 -1.2,-5 0.5,-8z" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_info.xml b/addons/casa/app/src/main/res/drawable/ic_info.xml
+new file mode 100644
+index 0000000..b1eb3fc
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_info.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- An information sign. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M12,3.5a8.5,8.5 0,1 0,0.01 0zM12,11v5.5M12,7.6h0.01" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/values/strings.xml b/addons/casa/app/src/main/res/values/strings.xml
+index 78622a1..aac66c7 100644
+--- a/addons/casa/app/src/main/res/values/strings.xml
++++ b/addons/casa/app/src/main/res/values/strings.xml
+@@ -6,4 +6,10 @@
+     <string name="not_configured">Casa: falta configurar este aparato desde el PC</string>
+     <string name="light_failed">No se pudo cambiar la luz: no responde en la red</string>
+     <string name="heater_failed">No se pudo cambiar el calefactor: no responde en la red</string>
++    <string name="session_saved">Casa: conectada con la nube</string>
++    <string name="service_running">Vigilando la casa</string>
++    <string name="cloud_down">Casa: sin conexión con la nube de Tuya</string>
++    <string name="cloud_down_sub">Los avisos de la puerta y el clima no llegan</string>
++    <string name="gas_down">Casa: el sensor de gas no responde por la red</string>
++    <string name="gas_down_sub">El aviso de gas solo llegará por la nube</string>
+ </resources>
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/CloudApiTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/CloudApiTest.java
+new file mode 100644
+index 0000000..1b2ad91
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/CloudApiTest.java
+@@ -0,0 +1,151 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertThrows;
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import org.json.JSONArray;
++import org.json.JSONObject;
++import org.junit.BeforeClass;
++import org.junit.Test;
++
++/** CloudApi's signing and encryption against the official SDK's (tuya_sharing.customerapi, vectors.json "cloud"). */
++public class CloudApiTest {
++    private static JSONObject c;
++
++    @BeforeClass
++    public static void load() throws Exception {
++        try (InputStream in = CloudApiTest.class.getResourceAsStream("/vectors.json")) {
++            c = new JSONObject(new String(in.readAllBytes(), StandardCharsets.UTF_8)).getJSONObject("cloud");
++        }
++    }
++
++    private static Map<String, String> headers() throws Exception {
++        Map<String, String> h = new LinkedHashMap<>();
++        h.put("X-appKey", c.getString("clientId"));
++        h.put("X-requestId", c.getString("rid"));
++        h.put("X-sid", "");
++        h.put("X-time", c.getString("time"));
++        h.put("X-token", c.getString("accessToken"));
++        return h;
++    }
++
++    @Test
++    public void keysMatchTheSdk() throws Exception {
++        String hashKey = CloudApi.hashKey(c.getString("rid"), c.getString("refreshToken"));
++        assertEquals(c.getString("hashKey"), hashKey);
++        assertEquals(c.getString("secret"), CloudApi.secret(c.getString("rid"), hashKey));
++    }
++
++    @Test
++    public void encryptionMatchesTheSdk() throws Exception {
++        assertEquals(c.getString("queryEnc"), CloudApi.encdata(c.getString("queryJson"), c.getString("secret"), c.getString("nonce")));
++        assertEquals(c.getString("bodyEnc"), CloudApi.encdata(c.getString("bodyJson"), c.getString("secret"), c.getString("nonce")));
++        assertEquals(c.getString("resultPlain"), CloudApi.decryptResult(c.getString("result"), c.getString("secret")));
++    }
++
++    @Test
++    public void signaturesMatchTheSdk() throws Exception {
++        assertEquals(c.getString("signGet"), CloudApi.sign(c.getString("hashKey"), headers(), c.getString("queryEnc"), ""));
++        assertEquals(c.getString("signPost"), CloudApi.sign(c.getString("hashKey"), headers(), "", c.getString("bodyEnc")));
++    }
++
++    /** A cloud that checks each request's signature and answers with an encrypted result, like Tuya's. */
++    static final class FakeCloud implements CloudApi.Http {
++        final List<String> paths = new ArrayList<>();
++        String nextRefresh = "refresh2";
++
++        @Override
++        public String send(String method, String url, Map<String, String> h, String body) throws IOException {
++            String path = url.replaceFirst("^https://[^/]+", "").replaceFirst("\\?.*$", "");
++            paths.add(method + " " + path);
++            try {
++                String rid = h.get("X-requestId");
++                String refresh = path.startsWith("/v1.0/m/token/") ? path.substring("/v1.0/m/token/".length()) : currentRefresh;
++                String hashKey = CloudApi.hashKey(rid, refresh);
++                String query = url.contains("?encdata=") ? java.net.URLDecoder.decode(url.substring(url.indexOf("?encdata=") + 9), "UTF-8") : "";
++                String bodyEnc = body == null ? "" : new JSONObject(body).optString("encdata", "");
++                if (!CloudApi.sign(hashKey, h, query, bodyEnc).equals(h.get("X-sign"))) return "{\"success\":false,\"code\":-9999999,\"msg\":\"sign invalid\"}";
++                String plain;
++                if (path.startsWith("/v1.0/m/token/")) {
++                    plain = "{\"accessToken\":\"access2\",\"refreshToken\":\"" + nextRefresh + "\",\"expireTime\":7200,\"uid\":\"u1\"}";
++                    currentRefresh = nextRefresh;
++                } else if (path.equals("/v1.0/m/life/ha/devices/detail")) {
++                    plain = "[{\"id\":\"d1\",\"online\":true,\"status\":[{\"code\":\"switch_1\",\"value\":true}]}]";
++                } else {
++                    plain = "{\"url\":\"ssl://m1.example:8883\",\"clientId\":\"c\",\"username\":\"u\",\"password\":\"p\",\"expireTime\":7200,"
++                            + "\"topic\":{\"devId\":{\"sub\":\"smart/device/out/{devId}\"},\"ownerId\":{\"sub\":\"o/{ownerId}\"}}}";
++                }
++                String secret = CloudApi.secret(rid, hashKey);
++                byte[] nonce = "0123456789ab".getBytes(StandardCharsets.US_ASCII);
++                javax.crypto.Cipher ci = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
++                ci.init(javax.crypto.Cipher.ENCRYPT_MODE, new javax.crypto.spec.SecretKeySpec(secret.getBytes(StandardCharsets.US_ASCII), "AES"),
++                        new javax.crypto.spec.GCMParameterSpec(128, nonce));
++                byte[] ct = ci.doFinal(plain.getBytes(StandardCharsets.UTF_8));
++                byte[] all = new byte[12 + ct.length];
++                System.arraycopy(nonce, 0, all, 0, 12);
++                System.arraycopy(ct, 0, all, 12, ct.length);
++                return "{\"success\":true,\"t\":1700000100000,\"result\":\"" + java.util.Base64.getEncoder().encodeToString(all) + "\"}";
++            } catch (Exception e) {
++                throw new IOException(e);
++            }
++        }
++
++        String currentRefresh = "refresh1";
++    }
++
++    private static CloudApi.Session session(long expireAt) {
++        return new CloudApi.Session("user", "term", "https://apigw.example", "access1", "refresh1", "u1", expireAt);
++    }
++
++    @Test
++    public void aSignedRequestReturnsTheDecryptedResult() throws Exception {
++        FakeCloud cloud = new FakeCloud();
++        CloudApi api = new CloudApi(session(Long.MAX_VALUE), cloud, () -> 1700000000000L, s -> { });
++        JSONArray devices = api.devicesDetail(List.of("d1", "d2"));
++        assertEquals("d1", devices.getJSONObject(0).getString("id"));
++        assertEquals("ssl://m1.example:8883", api.mqttConfig().getString("url"));
++        assertEquals(List.of("GET /v1.0/m/life/ha/devices/detail", "POST /v1.0/m/life/ha/access/config"), cloud.paths);
++    }
++
++    @Test
++    public void anExpiringSessionIsRenewedFirstAndSaved() throws Exception {
++        FakeCloud cloud = new FakeCloud();
++        CloudApi.Session[] saved = {null};
++        CloudApi api = new CloudApi(session(1700000030000L), cloud, () -> 1700000000000L, s -> saved[0] = s);
++        api.devicesDetail(List.of("d1"));
++        assertEquals("GET /v1.0/m/token/refresh1", cloud.paths.get(0));
++        assertEquals("refresh2", saved[0].refreshToken);
++        assertEquals(1700000100000L + 7200_000L, saved[0].expireAtMs);
++        assertFalse(cloud.paths.stream().anyMatch(p -> p.contains("terminal/expire")));
++    }
++
++    @Test
++    public void aRefusedRequestSaysWhy() {
++        CloudApi api = new CloudApi(session(Long.MAX_VALUE), (m, u, h, b) -> "{\"success\":false,\"code\":1010,\"msg\":\"token invalid\"}",
++                () -> 1L, s -> { });
++        IOException e = assertThrows(IOException.class, () -> api.devicesDetail(List.of("d1")));
++        assertTrue(e.getMessage().contains("token invalid"));
++    }
++
++    @Test
++    public void theSessionSurvivesAJsonRoundTrip() throws Exception {
++        CloudApi.Session s = session(123L);
++        CloudApi.Session back = CloudApi.Session.fromJson(s.toJson());
++        assertEquals(s.refreshToken, back.refreshToken);
++        assertEquals(123L, back.expireAtMs);
++        CloudApi.Session fromPc = CloudApi.Session.fromJson(new JSONObject()
++                .put("user_code", "uc").put("terminal_id", "t").put("endpoint", "https://e")
++                .put("token", new JSONObject().put("access_token", "a").put("refresh_token", "r").put("uid", "x")
++                        .put("t", 1000L).put("expire_time", 7200)).toString());
++        assertEquals(1000L + 7200_000L, fromPc.expireAtMs);
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FramesTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FramesTest.java
+index c5fce66..a8a0ea0 100644
+--- a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FramesTest.java
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FramesTest.java
+@@ -112,4 +112,30 @@ public class FramesTest {
+         f[35] ^= 1;
+         assertThrows(java.io.IOException.class, () -> Frames.decode6699(f, hex(s.getString("sessionKey"))));
+     }
++
++    @Test
++    public void v34FramesAreTheSameAsTinytuya() throws Exception {
++        JSONObject s = v.getJSONObject("v34");
++        byte[] session = hex(s.getString("sessionKey"));
++        for (String step : new String[] {"step1", "step3", "query", "heartbeat"}) {
++            JSONObject f = s.getJSONObject(step);
++            byte[] k = step.startsWith("step") ? key : session;
++            assertArrayEquals(step, hex(f.getString("frame")), Frames.encode34(f.getInt("seq"), f.getInt("cmd"), hex(f.getString("raw")), k));
++        }
++    }
++
++    @Test
++    public void v34HandshakeAndStatusDecode() throws Exception {
++        JSONObject s = v.getJSONObject("v34");
++        Frames.Message offer = Frames.decode34(hex(s.getJSONObject("step2").getString("frame")), key);
++        assertArrayEquals(hex(s.getString("remoteNonce")), Arrays.copyOfRange(offer.payload, 0, 16));
++        assertArrayEquals(Frames.hmac(key, hex(s.getString("localNonce"))), Arrays.copyOfRange(offer.payload, 16, 48));
++        byte[] session = Frames.sessionKey34(key, hex(s.getString("localNonce")), hex(s.getString("remoteNonce")));
++        assertArrayEquals(hex(s.getString("sessionKey")), session);
++        Frames.Message status = Frames.decode34(hex(s.getJSONObject("status").getString("frame")), session);
++        assertEquals(s.getJSONObject("status").getString("json"), new String(status.payload, StandardCharsets.UTF_8));
++        byte[] tampered = hex(s.getJSONObject("status").getString("frame"));
++        tampered[22] ^= 1;
++        assertThrows(java.io.IOException.class, () -> Frames.decode34(tampered, session));
++    }
+ }
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
+new file mode 100644
+index 0000000..a6a6e7e
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/LogicTest.java
+@@ -0,0 +1,143 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNull;
++
++import java.util.List;
++import org.junit.Test;
++
++/** The door's messages, MQTT reports and the readings' wording: no Android, no network. */
++public class LogicTest {
++    private static final long MIN = 60_000L;
++
++    @Test
++    public void theDoorSaysOpenRemindsEveryFiveMinutesAndSaysHowLongWhenClosed() {
++        DoorAlerts d = new DoorAlerts();
++        d.init(false, 0);
++        DoorAlerts.Alert open = d.onDoor(true, 1000);
++        assertEquals("Puerta abierta", open.title);
++        assertNull(d.onTick(1000 + 4 * MIN));
++        DoorAlerts.Alert r1 = d.onTick(1000 + 5 * MIN);
++        assertEquals("La puerta sigue abierta", r1.title);
++        assertEquals("Desde hace 5 min · te lo recuerdo cada 5 min", r1.sub);
++        assertNull(d.onTick(1000 + 6 * MIN));
++        assertEquals("Desde hace 10 min · te lo recuerdo cada 5 min", d.onTick(1000 + 10 * MIN).sub);
++        DoorAlerts.Alert closed = d.onDoor(false, 1000 + 12 * MIN);
++        assertEquals("Puerta cerrada", closed.title);
++        assertEquals("Estuvo abierta 12 min", closed.sub);
++        assertNull(d.onTick(1000 + 20 * MIN));
++    }
++
++    @Test
++    public void repeatedReportsAndTheFirstReadingSayNothing() {
++        DoorAlerts d = new DoorAlerts();
++        assertNull(d.onDoor(true, 0));     // first reading: just learns the state
++        assertNull(d.onDoor(true, 5));     // the same state again
++        assertEquals("Estuvo abierta menos de un minuto", d.onDoor(false, 30_000).sub);
++    }
++
++    @Test
++    public void turningTheTvOnWithTheDoorOpenReminds() {
++        DoorAlerts d = new DoorAlerts();
++        d.init(true, 0);
++        assertEquals("Desde hace 1 h 5 min · te lo recuerdo cada 5 min", d.onScreenOn(65 * MIN).sub);
++        d.onDoor(false, 70 * MIN);
++        assertNull(d.onScreenOn(71 * MIN));
++        assertEquals("Estuvo abierta 1 h 10 min", new DoorAlerts() {{ init(true, 0); }}.onDoor(false, 70 * MIN).sub);
++    }
++
++    @Test
++    public void nextTickIsTheNextReminder() {
++        DoorAlerts d = new DoorAlerts();
++        d.init(false, 0);
++        assertEquals(-1, d.nextTickAt());
++        d.onDoor(true, 1000);
++        assertEquals(1000 + 5 * MIN, d.nextTickAt());
++    }
++
++    @Test
++    public void mqttReportsByDataPointOrByCode() throws Exception {
++        List<Reports.Change> c = Reports.parse("{\"protocol\":4,\"data\":{\"devId\":\"d1\",\"status\":[{\"dpId\":1,\"t\":1,\"value\":true},{\"code\":\"va_humidity\",\"value\":66}]}}");
++        assertEquals(2, c.size());
++        assertEquals("d1", c.get(0).devId);
++        assertEquals("1", c.get(0).dp);
++        assertEquals(Boolean.TRUE, c.get(0).value);
++        assertEquals("va_humidity", c.get(1).dp);
++        assertEquals(0, Reports.parse("{\"protocol\":20,\"data\":{}}").size());
++        assertEquals(0, Reports.parse("not json").size());
++    }
++
++    @Test
++    public void rolesTranslateDataPointsAndCodes() {
++        assertEquals(Roles.Field.ON, Roles.field(Devices.LUZ, "1"));
++        assertEquals(Roles.Field.ON, Roles.field(Devices.CALEFACTOR, "switch_1"));
++        assertEquals(Roles.Field.TEMPERATURE, Roles.field(Roles.CLIMA, "1"));
++        assertEquals(Roles.Field.HUMIDITY, Roles.field(Roles.CLIMA, "humidity_value"));
++        assertEquals(Roles.Field.HUMIDITY, Roles.field(Roles.CLIMA, "va_humidity"));
++        assertEquals(Roles.Field.DOOR_OPEN, Roles.field(Roles.PUERTA, "doorcontact_state"));
++        assertEquals(Roles.Field.GAS, Roles.field(Roles.GAS, "2"));
++        assertNull(Roles.field(Roles.GAS, "5"));
++    }
++
++    @Test
++    public void readingsAreWrittenTheSpanishWay() {
++        assertEquals("20,3°", State.temperature(203));
++        assertEquals("-1,5°", State.temperature(-15));
++        assertEquals("—", State.temperature(null));
++        assertEquals("66 %", State.humidity(66));
++        assertEquals("—", State.humidity(null));
++    }
++
++    /** A 3.4 frame as the sensor sends it: return code in clear, then the ECB payload, then the HMAC. */
++    private static byte[] device34(int cmd, byte[] raw, byte[] key) throws Exception {
++        javax.crypto.Cipher c = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding");
++        c.init(javax.crypto.Cipher.ENCRYPT_MODE, new javax.crypto.spec.SecretKeySpec(key, "AES"));
++        byte[] enc = c.doFinal(raw);
++        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(16 + 4 + enc.length + 36);
++        b.putInt(0x000055AA).putInt(9).putInt(cmd).putInt(4 + enc.length + 36).putInt(0).put(enc);
++        b.put(Frames.hmac(key, java.util.Arrays.copyOf(b.array(), 20 + enc.length))).putInt(0x0000AA55);
++        return b.array();
++    }
++
++    @Test
++    public void theGasSensorHandshakeGivesTheSessionKey() throws Exception {
++        byte[] key = "0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
++        byte[] local = new byte[16], remote = new byte[16];
++        java.util.Arrays.fill(local, (byte) 1);
++        java.util.Arrays.fill(remote, (byte) 2);
++        java.util.List<byte[]> sent = new java.util.ArrayList<>();
++        byte[] offer = device34(Frames.SESS_KEY_NEG_RESP, concat(remote, Frames.hmac(key, local)), key);
++        TuyaLocal.Transport sensor = new TuyaLocal.Transport() {
++            boolean answered;
++            public void write(byte[] f) { sent.add(f); }
++            public byte[] readFrame() throws java.io.IOException { if (answered) throw new java.io.IOException("timeout"); answered = true; return offer; }
++            public void close() { }
++        };
++        byte[] session = GasWatch.negotiate34(sensor, key, n -> local.clone());
++        assertEquals(java.util.Arrays.toString(Frames.sessionKey34(key, local, remote)), java.util.Arrays.toString(session));
++        assertEquals(2, sent.size());
++        Frames.Message finish = Frames.decode34(concatRetcode(sent.get(1)), key);
++        assertEquals(java.util.Arrays.toString(Frames.hmac(key, remote)), java.util.Arrays.toString(finish.payload));
++        assertEquals("alarm", GasWatch.gasStatus("{\"protocol\":4,\"data\":{\"dps\":{\"2\":\"alarm\"}}}".getBytes()));
++        assertEquals("normal", GasWatch.gasStatus("{\"dps\":{\"1\":\"others\",\"2\":\"normal\",\"3\":180}}".getBytes()));
++        assertNull(GasWatch.gasStatus("{\"dps\":{\"5\":0}}".getBytes()));
++    }
++
++    /** Client frames carry no return code; give one so the device-side decoder reads them (HMAC recomputed). */
++    private static byte[] concatRetcode(byte[] f) throws Exception {
++        java.nio.ByteBuffer in = java.nio.ByteBuffer.wrap(f);
++        int len = in.getInt(12);
++        byte[] enc = java.util.Arrays.copyOfRange(f, 16, 16 + len - 36);
++        byte[] key = "0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
++        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(16 + 4 + enc.length + 36);
++        b.putInt(0x000055AA).putInt(in.getInt(4)).putInt(in.getInt(8)).putInt(4 + enc.length + 36).putInt(0).put(enc);
++        b.put(Frames.hmac(key, java.util.Arrays.copyOf(b.array(), 20 + enc.length))).putInt(0x0000AA55);
++        return b.array();
++    }
++
++    private static byte[] concat(byte[] a, byte[] b) {
++        byte[] out = java.util.Arrays.copyOf(a, a.length + b.length);
++        System.arraycopy(b, 0, out, a.length, b.length);
++        return out;
++    }
++}
+diff --git a/addons/casa/app/src/test/resources/vectors.json b/addons/casa/app/src/test/resources/vectors.json
+index a368c1a..2ec0c2f 100644
+--- a/addons/casa/app/src/test/resources/vectors.json
++++ b/addons/casa/app/src/test/resources/vectors.json
+@@ -51,5 +51,59 @@
+       "frame": "000066990000000000020000000800000066505152535455565758595a5bdd5a377342f4f4a35af4f2f95c44cdcbcc882b03019ed88350c6b051a7fd816319d978e28d79fedbd4884769ac576dc1b78ecefa8036ef8e85f7f65399323f52ccc2667fa4d959bdc2a22881f02cddf45620872a15690dcbdcd700009966",
+       "json": "{\"protocol\":4,\"t\":1700000000,\"data\":{\"dps\":{\"1\":true}}}"
+     }
++  },
++  "v34": {
++    "localNonce": "55565758595a5b5c5d5e5f6061626364",
++    "remoteNonce": "909192939495969798999a9b9c9d9e9f",
++    "sessionKey": "1add2f440a3e101cfa095a77da2976cb",
++    "step1": {
++      "seq": 1,
++      "cmd": 3,
++      "raw": "55565758595a5b5c5d5e5f6061626364",
++      "frame": "000055aa0000000100000003000000442ca1fe9dc602b5bb5e9d9fe7bd753ae1377222e061a924c591cd9c27ea163ed47ab85566ad7e2738d01879f70cd47d0f421badbc6765f669e3cffab8c71746ea0000aa55"
++    },
++    "step2": {
++      "frame": "000055aa00000001000000040000006800000000da259d34690a46c1d152e335b51962a8b5e3015d7d7cd69dd2fcafd0343805a1a8a247404675a70862680364667be180377222e061a924c591cd9c27ea163ed4763600d74302367016206ea15d2be9780046bff458971a4f7b2ec2def49bdd1f0000aa55"
++    },
++    "step3": {
++      "seq": 2,
++      "cmd": 5,
++      "raw": "f048edfb27e1d7d471105fc3d34ee87f25ac3dc51018bb0e1fd61e19e3d90165",
++      "frame": "000055aa000000020000000500000054754400d99a4400462fff3455c7a9b38d128172023dcfcd6f13f5cf176694d6e8377222e061a924c591cd9c27ea163ed4d809343748ce626664e729ac74420ba2cf898663fb86584bda30bd51e1c2fa800000aa55"
++    },
++    "query": {
++      "seq": 3,
++      "cmd": 16,
++      "raw": "7b7d",
++      "frame": "000055aa00000003000000100000003491b4e8550ed8553d863fd190654f6ef51b7a65e8b3aeb13dc82e9fa84da13836a9a0a5b6e7573b9bf3f47f201754ac5f0000aa55"
++    },
++    "heartbeat": {
++      "seq": 4,
++      "cmd": 9,
++      "raw": "7b2267774964223a2266616b65646576696365303030303031222c226465764964223a2266616b65646576696365303030303031227d",
++      "frame": "000055aa0000000400000009000000641ffa1eda99c0432851890678807b89128bd99a14517cfb1b4f656adbc91900571ffbb8f1292457136d64b708ddd8f511ad47bde84a346747eca3771ae5ce429b30281bee4bacf7eaf7f6ae6702fa82dbc765d0c25749472679c7d9bebf4ac0a90000aa55"
++    },
++    "status": {
++      "frame": "000055aa00000003000000080000007800000000e542cbd3b7d68a37f7255ee468a3d3a787d3fb0bd048f192733c6d482a33caa67de0a796a4e60e080386f340588c6182f41ef9b23e713b6f4d508369dbd1f8c7b636b82b45bd4bf37603d25496a2e9987dd7ad0512e704f700cced2d141d67510ba98d37f93c90ab0f351cc27c65261a0000aa55",
++      "json": "{\"protocol\":4,\"t\":1700000000,\"data\":{\"dps\":{\"2\":\"alarm\"}}}"
++    }
++  },
++  "cloud": {
++    "rid": "11111111-2222-3333-4444-555555555555",
++    "refreshToken": "refreshTokenFake",
++    "accessToken": "accessTokenFake",
++    "time": "1700000000000",
++    "clientId": "HA_3y9q4ak7g4ephrvke",
++    "hashKey": "cd418e7e7b8fc67d27ba1ccdd175fced",
++    "secret": "6dd19807b87b33ab",
++    "nonce": "ABCDEFGHJKMN",
++    "queryJson": "{\"devIds\":\"a1,b2\"}",
++    "queryEnc": "QUJDREVGR0hKS01Ob+28+gIidsyfijzWtqiPZ+bNQN/b/jhBPMRxXqF9ynOrug==",
++    "bodyJson": "{\"linkId\":\"tuya-device-sharing-sdk-python.x\"}",
++    "bodyEnc": "QUJDREVGR0hKS01Ob+209hoAW9ufijzD8v2MeKDV4W7CDEhE+G4B2igbao3vsZ28sqQwXZyAaeHL8bOA7tfdmu3AepBF3Vu8rA==",
++    "signGet": "f1d0fc38fe462695313568b142c3f67aade32adb69a6b69579980bb160f3c012",
++    "signPost": "6decc63e5bb7cf80553b9f1cc2b094800391b898646465d0db3798685c42f965",
++    "result": "MDEyMzQ1Njc4OWFieht4zlhTOr5DgroAPnKunDDKAJNyO8V69qRSQQ3ra4Cir6gMgfu54ecRmz3fmw==",
++    "resultPlain": "{\"success\":true,\"items\":[1,2]}"
+   }
+ }
+-- 
+2.54.0.windows.1
+

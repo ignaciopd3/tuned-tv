@@ -1,0 +1,63 @@
+From 60c64c827eef6efccae480fa7da916924243874d Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 17:11:47 +0100
+Subject: [PATCH 01/23] RemoteKeys: an input: target that is a tuner opens its
+ channel collection
+
+On a TCL G05 (MediaTek, Android 11) the tuner's passthrough URI leaves the last
+HDMI source selected; the channel collection switches to the antenna, as the
+Live TV tile already does with live_tv_input_id.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/RemoteKeys.java    | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/RemoteKeys.java b/launcher/app/src/main/java/com/gathin/tvhome/RemoteKeys.java
+index 6fd9d9d..84219f6 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/RemoteKeys.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/RemoteKeys.java
+@@ -8,6 +8,8 @@ import android.content.Context;
+ import android.content.Intent;
+ import android.media.AudioManager;
+ import android.media.tv.TvContract;
++import android.media.tv.TvInputInfo;
++import android.media.tv.TvInputManager;
+ import android.os.Build;
+ import android.provider.Settings;
+ import android.os.Handler;
+@@ -329,6 +331,13 @@ final class RemoteKeys {
+         return heldMs >= HOLD_MS && holdApp != null ? holdApp : app;
+     }
+ 
++    /** Whether a TV input is a tuner (it has channels) rather than a passthrough input (HDMI, AV); false when unknown. */
++    private static boolean isTuner(Context ctx, String inputId) {
++        TvInputManager tim = (TvInputManager) ctx.getSystemService(Context.TV_INPUT_SERVICE);
++        TvInputInfo info = tim == null ? null : tim.getTvInputInfo(inputId);
++        return info != null && !info.isPassthroughInput();
++    }
++
+     /** The TV input id of an "input:<id>" target, e.g. "input:com.tcl.tvinput/.passthroughinput.TvPassThroughService/HW1413743104"; null for a package. */
+     static String inputId(String target) {
+         if (target == null || !target.startsWith("input:")) return null;
+@@ -447,10 +456,14 @@ final class RemoteKeys {
+         }
+         String inputId = inputId(pkg);
+         if (inputId != null) {
+-            // The same passthrough URI the Inputs menu opens, which the Live TV app handles.
++            // HDMI and AV: the same passthrough URI the Inputs menu opens, which the Live TV app handles.
++            // A tuner: its channel collection, as the Live TV tile does with live_tv_input_id. On a TCL G05
++            // (MediaTek) the tuner's passthrough URI leaves the last HDMI source selected (as in #1941).
++            boolean tuner = isTuner(ctx, inputId);
+             Intent view = new Intent(Intent.ACTION_VIEW)
+-                    .setDataAndType(TvContract.buildChannelUriForPassthroughInput(inputId),
+-                            "vnd.android.cursor.item/channel")
++                    .setDataAndType(tuner ? TvContract.buildChannelsUriForInput(inputId)
++                                    : TvContract.buildChannelUriForPassthroughInput(inputId),
++                            tuner ? TvContract.Channels.CONTENT_TYPE : "vnd.android.cursor.item/channel")
+                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+             // Aimed at the Live TV app first, as the Inputs menu does: an app that also claims the channel URI
+             // (the Fluffy file manager on a TCL G03) turned the press into a chooser.
+-- 
+2.54.0.windows.1
+

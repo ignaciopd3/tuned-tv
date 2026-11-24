@@ -1,0 +1,164 @@
+From f9e2fdb20fa4e7098448c8ac60ef6d458fd5a631 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 22:34:31 +0100
+Subject: [PATCH 07/23] Weather under Home's idle clock too (ClockActivity),
+ sharing the screensaver's line
+
+home_idle_clock_minutes opens ClockActivity, which used the same dream_clock layout but
+never filled its weather line; only ClockDream did.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/ClockActivity.java  | 17 ++++++++++++++++-
+ .../java/com/gathin/tvhome/ClockDream.java     | 13 ++-----------
+ .../java/com/gathin/tvhome/WeatherNow.java     | 18 ++++++++++++++++++
+ .../java/com/gathin/tvhome/WeatherNowTest.java |  7 +++++++
+ 4 files changed, 43 insertions(+), 12 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
+index c4c47d1..fd2d8e0 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
+@@ -2,6 +2,8 @@ package com.gathin.tvhome;
+ 
+ import android.app.Activity;
+ import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
+ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.View;
+@@ -19,32 +21,45 @@ public class ClockActivity extends Activity {
+ 
+ 
+     private ClockScene scene;
++    /** weather_app: the weather under the date, as on the screensaver; null when the key is off. */
++    private WeatherNow weather;
+ 
+     @Override
+     @SuppressWarnings("deprecation")
+     protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+         setContentView(R.layout.dream_clock);
+-        ClockFormat.apply(getWindow().getDecorView(), Config.load(this).clockFormat);
++        Config cfg = Config.load(this);
++        ClockFormat.apply(getWindow().getDecorView(), cfg.clockFormat);
+         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE);
+         scene = new ClockScene(getWindow().getDecorView());
+         scene.useHomeWallpaper(this);
++        weather = WeatherNow.create(this, cfg.weatherApp, new Handler(Looper.getMainLooper()),
++                () -> WeatherNow.showOnClock(findViewById(R.id.dreamWeather), weather.now()));
+     }
+ 
+     @Override
+     protected void onResume() {
+         super.onResume();
+         scene.start();
++        if (weather != null) weather.start();
+     }
+ 
+     @Override
+     protected void onPause() {
+         scene.stop();
++        if (weather != null) weather.stop();
+         super.onPause();
+         finish();   // never left behind in the back stack
+     }
+ 
++    @Override
++    protected void onDestroy() {
++        if (weather != null) weather.shutdown();
++        super.onDestroy();
++    }
++
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent event) {
+         // The key that wakes the clock should not also act on Home, so it is consumed here.
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+index b6ccc18..e7c91a2 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+@@ -3,8 +3,6 @@ package com.gathin.tvhome;
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.service.dreams.DreamService;
+-import android.view.View;
+-import android.widget.TextView;
+ 
+ /**
+  * Screensaver: the launcher's thin clock and date on black, over a slow ambient glow (ClockScene).
+@@ -58,14 +56,7 @@ public class ClockDream extends DreamService {
+ 
+     /** weather_app: the reading under the date, gone until there is one. */
+     private void showWeather() {
+-        TextView line = getWindow().getDecorView().findViewById(R.id.dreamWeather);
+-        WeatherNow.Now now = weather == null ? null : weather.now();
+-        if (now == null) {
+-            line.setVisibility(View.GONE);
+-            return;
+-        }
+-        line.setText(now.summary.isEmpty() ? now.temp : now.temp + " · " + now.summary);
+-        line.setCompoundDrawablesRelativeWithIntrinsicBounds(WeatherNow.icon(now.code, now.day), 0, 0, 0);
+-        line.setVisibility(View.VISIBLE);
++        WeatherNow.showOnClock(getWindow().getDecorView().findViewById(R.id.dreamWeather),
++                weather == null ? null : weather.now());
+     }
+ }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java b/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
+index 81790bd..e475244 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
+@@ -5,6 +5,8 @@ import android.database.ContentObserver;
+ import android.database.Cursor;
+ import android.net.Uri;
+ import android.os.Handler;
++import android.view.View;
++import android.widget.TextView;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.RejectedExecutionException;
+@@ -126,6 +128,22 @@ final class WeatherNow {
+         return now;
+     }
+ 
++    /** The line under the clock (screensaver and Home's idle clock): "15° · Nublado · Sensación 14°". */
++    static String clockLine(Now now) {
++        return now.summary.isEmpty() ? now.temp : now.temp + " · " + now.summary;
++    }
++
++    /** Shows a reading on dream_clock's weather line with its icon, or hides the line until there is one. */
++    static void showOnClock(TextView line, Now now) {
++        if (now == null) {
++            line.setVisibility(View.GONE);
++            return;
++        }
++        line.setText(clockLine(now));
++        line.setCompoundDrawablesRelativeWithIntrinsicBounds(icon(now.code, now.day), 0, 0, 0);
++        line.setVisibility(View.VISIBLE);
++    }
++
+     /** The add-on's row, or null when there is none or it has no temperature (no city chosen, first fetch running). */
+     static Now fromRow(Object[] r) {
+         if (r == null || !(r[0] instanceof String) || ((String) r[0]).trim().isEmpty()) return null;
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java b/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
+index 858fe89..0443323 100644
+--- a/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
++++ b/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
+@@ -35,6 +35,13 @@ public class WeatherNowTest {
+         assertTrue(now.day);
+     }
+ 
++    @Test
++    public void theClockLineIsTheTemperatureAndTheSummary() {
++        assertEquals("15° · Nublado · Sensación 14°",
++                WeatherNow.clockLine(WeatherNow.fromRow(new Object[] {"15°", "Nublado · Sensación 14°", "", 3, 1})));
++        assertEquals("9°", WeatherNow.clockLine(WeatherNow.fromRow(new Object[] {"9°", null, null, null, null})));
++    }
++
+     @Test
+     public void iconsFollowTheWmoCode() {
+         assertEquals(R.drawable.ic_weather_sun, WeatherNow.icon(0, true));
+-- 
+2.54.0.windows.1
+

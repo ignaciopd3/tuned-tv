@@ -1,0 +1,193 @@
+From 5a76a2181fe2473ec1f4e473b8d97480b123b849 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 23:01:58 +0100
+Subject: [PATCH 09/23] VPN pill opens the app whose VPN is up: vpn_app_per_app
+ for a per-app VPN
+
+Android does not tell Home whose VPN is up, only whether it covers Home. A per-app VPN
+(a streaming app's built-in WARP that only carries that app) leaves Home out, so the pill
+opens vpn_app_per_app then and vpn_app otherwise.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../main/java/com/gathin/tvhome/Config.java   |  9 +++++--
+ .../java/com/gathin/tvhome/MainActivity.java  | 25 +++++++++++++++----
+ .../main/java/com/gathin/tvhome/VpnBadge.java |  8 ++++++
+ launcher/app/src/main/res/values/config.xml   |  4 +++
+ .../java/com/gathin/tvhome/VpnPillTest.java   | 11 ++++++++
+ 5 files changed, 50 insertions(+), 7 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 1dbead7..58adce1 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -159,6 +159,8 @@ final class Config {
+     /** The focused tile and the glass highlight swing past their target before settling (config.xml, focus_overshoot). */
+     final boolean focusOvershoot;
+     final String vpnApp;
++    /** vpn_app_per_app: what the VPN pill opens while the VPN that is up leaves Home out (a per-app VPN); empty: vpn_app. */
++    final String vpnAppPerApp;
+     final boolean showHomeSettingsShortcut;
+     /** One line under the clock: CPU, free memory, free storage. Off unless config or a theme turns it on. */
+     final boolean showStats;
+@@ -308,8 +310,9 @@ final class Config {
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+                    boolean settingsKeyClearTask, String weatherApp, boolean adbWarning,
+-                   boolean headerCapsule, boolean topBarCapsule) {
++                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp) {
+         this.weatherApp = weatherApp;
++        this.vpnAppPerApp = vpnAppPerApp;
+         this.adbWarning = adbWarning;
+         this.headerCapsule = headerCapsule;
+         this.topBarCapsule = topBarCapsule;
+@@ -512,6 +515,7 @@ final class Config {
+         boolean wallpaperCaptions = res.getBoolean(R.bool.wallpaper_captions);
+         boolean tileMenu = res.getBoolean(R.bool.tile_menu);
+         String vpn = res.getString(R.string.vpn_app).trim();
++        String vpnPerApp = res.getString(R.string.vpn_app_per_app).trim();
+         boolean homeSettings = res.getBoolean(R.bool.show_home_settings_shortcut);
+         boolean showStats = res.getBoolean(R.bool.show_stats);
+         String gameDay = res.getString(R.string.game_day).trim();
+@@ -633,6 +637,7 @@ final class Config {
+             wallpaperCaptions = bool(json, "wallpaper_captions", wallpaperCaptions);
+             tileMenu = bool(json, "tile_menu", tileMenu);
+             vpn = string(json, "vpn_app", vpn);
++            vpnPerApp = string(json, "vpn_app_per_app", vpnPerApp);
+             homeSettings = bool(json, "show_home_settings_shortcut", homeSettings);
+             showStats = bool(json, "show_stats", showStats);
+             gameDay = string(json, "game_day", gameDay);
+@@ -753,7 +758,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule);
++                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index d48dd76..1fcc1aa 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -233,6 +233,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     /** Optional time-of-day backdrop (config.xml, sky_intensity); 0 keeps it hidden. */
+     private SkyView sky;
+     private String vpnApp;
++    /** vpn_app_per_app, and whether the VPN that is up leaves Home out (so it is a per-app VPN, not the whole TV's). */
++    private String vpnAppPerApp;
++    private boolean perAppVpnUp;
+     /** vpn_pill: the VPN shown as its own pill (btnVpn) instead of a badge in the network pill. Off with top_menu. */
+     private boolean vpnPill;
+     private TextView btnVpn;
+@@ -626,6 +629,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             date.setPadding(0, (int) (4 * density), 0, 0);
+         }
+         vpnApp = cfg.vpnApp;
++        vpnAppPerApp = cfg.vpnAppPerApp;
+         vpnPill = cfg.vpnPill && !cfg.topMenu;
+         btnVpn = findViewById(R.id.btnVpn);
+         adbWarning = cfg.adbWarning;
+@@ -3074,9 +3078,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) ethernet = true;
+                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) wifi = true;
+             }
++            // A VPN for the whole TV is Home's own default network too; a per-app one (an app's built-in VPN) is not.
++            NetworkCapabilities own = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
++            perAppVpnUp = vpn && (own == null || !own.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
+             if (!online) {
+                 text = getString(R.string.offline);
+                 vpn = false;
++                perAppVpnUp = false;
+             } else if (ethernet) {
+                 text = getString(R.string.ethernet);
+                 icon = R.drawable.ic_ethernet;
+@@ -3265,17 +3273,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+ 
+     /** vpn_app's launch intent, or null when none is set or it is not installed. */
+     private Intent vpnAppIntent() {
+-        if (vpnApp.isEmpty()) return null;
+-        Intent i = getPackageManager().getLeanbackLaunchIntentForPackage(vpnApp);
+-        return i != null ? i : getPackageManager().getLaunchIntentForPackage(vpnApp);
++        return launchIntent(vpnApp);
++    }
++
++    /** A package's launch intent (its TV one first), or null when the name is empty or it is not installed. */
++    private Intent launchIntent(String pkg) {
++        if (pkg.isEmpty()) return null;
++        Intent i = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
++        return i != null ? i : getPackageManager().getLaunchIntentForPackage(pkg);
+     }
+ 
+     /**
+-     * vpn_pill: the VPN app, where it is switched on and off. Without one installed, the App library to pick from, or
++     * vpn_pill: the VPN app, where it is switched on and off: vpn_app_per_app while a per-app VPN is up (the one that
++     * switched it on), vpn_app otherwise. Without one installed, the App library to pick from, or
+      * Android's VPN settings when the theme turned the library off.
+      */
+     private void openVpnPill() {
+-        Intent i = vpnAppIntent();
++        Intent i = launchIntent(VpnBadge.appToOpen(perAppVpnUp, vpnApp, vpnAppPerApp));
++        if (i == null) i = vpnAppIntent();
+         if (i != null || !appLibraryEnabled) {
+             open(i != null ? i : systemIntent(Settings.ACTION_VPN_SETTINGS));
+             return;
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/VpnBadge.java b/launcher/app/src/main/java/com/gathin/tvhome/VpnBadge.java
+index be81332..31479ef 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/VpnBadge.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/VpnBadge.java
+@@ -47,6 +47,14 @@ final class VpnBadge extends ReplacementSpan {
+         return vpnUp ? PILL_UP : vpnAppInstalled ? PILL_OFF : PILL_HIDDEN;
+     }
+ 
++    /**
++     * The app the VPN pill opens: vpn_app_per_app while the VPN that is up leaves Home out (a per-app VPN, such as a
++     * streaming app's built-in one; Android does not tell Home whose VPN it is), vpn_app otherwise.
++     */
++    static String appToOpen(boolean perAppVpnUp, String vpnApp, String perAppVpnApp) {
++        return perAppVpnUp && !perAppVpnApp.isEmpty() ? perAppVpnApp : vpnApp;
++    }
++
+     /** icon_only_vpn: the closed lock while a VPN is up, the open lock while none is. */
+     static int iconOnlyLock(boolean up) {
+         return up ? R.drawable.ic_lock : R.drawable.ic_lock_open;
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 620aa25..5d53598 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -299,6 +299,10 @@
+          VPN you use. Empty: the pill opens Wi-Fi settings. The green VPN badge shows for any VPN either way;
+          with an app set here, a red "VPN off" badge also shows while no VPN is up. -->
+     <string name="vpn_app" translatable="false"></string>
++    <!-- What the VPN pill opens instead of vpn_app while the VPN that is up leaves Home out: a per-app VPN, such as a
++         streaming app's built-in one that only carries that app (Android does not tell Home whose VPN it is, only
++         whether it covers Home). Empty: always vpn_app. -->
++    <string name="vpn_app_per_app" translatable="false"></string>
+     <!-- The VPN as its own pill after the network pill, instead of a badge inside it: solid green with a lock while a
+          VPN is up, solid red "VPN off" while none is and vpn_app is installed. Pressing it opens vpn_app (without it,
+          the App library, or VPN settings when app_library is off), and the network pill then always opens Wi-Fi
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/VpnPillTest.java b/launcher/app/src/test/java/com/gathin/tvhome/VpnPillTest.java
+index f657aad..6b81f22 100644
+--- a/launcher/app/src/test/java/com/gathin/tvhome/VpnPillTest.java
++++ b/launcher/app/src/test/java/com/gathin/tvhome/VpnPillTest.java
+@@ -23,6 +23,17 @@ public class VpnPillTest {
+         assertEquals(R.drawable.ic_lock_open, VpnBadge.iconOnlyLock(false));
+     }
+ 
++    @Test
++    public void aVpnThatLeavesHomeOutOpensThePerAppVpnApp() {
++        assertEquals("com.example.iptv", VpnBadge.appToOpen(true, "ch.protonvpn.android", "com.example.iptv"));
++    }
++
++    @Test
++    public void aVpnForTheWholeTvOrNoVpnOpensVpnApp() {
++        assertEquals("ch.protonvpn.android", VpnBadge.appToOpen(false, "ch.protonvpn.android", "com.example.iptv"));
++        assertEquals("ch.protonvpn.android", VpnBadge.appToOpen(true, "ch.protonvpn.android", ""));
++    }
++
+     @Test
+     public void hiddenWithNoVpnAndNoInstalledVpnApp() {
+         assertEquals(VpnBadge.PILL_HIDDEN, VpnBadge.pillState(false, false));
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,60 @@
+# Nivel seguro: bloatware, telemetría y anuncios. Todo se DESHABILITA (reversible), nada se desinstala.
+# Formato: paquete [disable|uninstall]   # motivo   (disable por defecto)
+#
+# Fuente: cleanyourtv, examples/tcl-65c735 (G05_4K_GB EU, AR2101: 65C735, 55C728, 65C935, 65C745 y 55C735),
+# examples/tcl-g05-google-tv y docs/devices/tcl-55c728-g05-4k-gb.md. Solo entra aquí lo deshabilitado sin
+# incidencias en varios G05 y ajeno a imagen, sonido, mando, HDMI, DRM y actualizaciones.
+# Cruzado con esta TV el 2026-11-17 (158 paquetes, build AR23).
+#
+# Ojo: mientras com.tcl.ttvs siga activo (ver packages.caution), el firmware vuelve a activar en cada arranque
+# usercenter, smartalexa y notereminder (y esticker a los minutos). Volver a lanzar `--action debloat` los
+# deshabilita de nuevo (idempotente).
+
+# Telemetría y analítica
+com.tcl.logkit                          # captura y sube logs de diagnóstico a TCL
+com.tcl.guard uninstall                 # TGuard: rastreo, «health info» y limpiador de apps; PERSISTENT: deshabilitado arranca igual al encender
+com.google.android.feedback             # «Enviar comentarios» a Google
+com.google.android.partnersetup         # atribución de apps de partners
+
+# Anuncios, promos y contenido de TCL
+com.tcl.waterfall.overseas              # recomendaciones de contenido de TCL
+com.tcl.messagebox                      # mensajes y promos push de TCL
+com.tcl.usercenter                      # cuenta TCL y avisos para iniciar sesión
+com.tcl.dashboard                       # panel «TCL Home»: caja de regalos y promos (ninguna tecla lo usa)
+com.tcl.tv.tclhome_passive              # empuja contenido de TCL al inicio en cada arranque
+com.tcl.channelplus                     # TCL Live: canales FAST con anuncios
+com.tcl.esticker                        # pegatinas del modo demo de tienda
+com.tcl.useragreement                   # pantalla de acuerdo del primer arranque
+android.autoinstalls.config.google.gtvpai   # instala apps de partners sin preguntar
+
+# Preinstalados sin uso (sus funciones las cubren apps que ya tienes)
+com.tcl.browser                         # navegador de TCL
+com.tcl.android.webview                 # WebView de TCL; el sistema usa com.google.android.webview (verificado)
+com.tcl.ui_mediaCenter                  # reproductor USB (tienes VLC y explorador de archivos)
+com.tcl.gallery                         # galería USB (el salvapantallas actual es el de Google, no este)
+com.tcl.ocean.instructions              # manual electrónico
+com.tcl.notereminder                    # notas y recordatorios
+com.tcl.smartalexa                      # Alexa
+com.google.android.play.games           # Play Juegos
+com.google.android.videos               # tienda Google TV / Play Películas (lo comprado se ve en YouTube)
+com.google.android.marvin.talkback      # lector de pantalla
+com.google.android.syncadapters.calendar    # sincronización de Google Calendar
+com.google.android.onetimeinitializer   # inicializador de un solo uso (ya ejecutado)
+com.android.printspooler                # cola de impresión
+
+# Salvapantallas Ambient de Google (fotos y contenido de Google, ~110 MB en memoria). Sustituido por el reloj del launcher.
+com.google.android.apps.tv.dreamx
+
+# Asistente de Google (2026-11-22, opcional).
+# Era también el reconocimiento de voz de todo el sistema: sin él no hay búsqueda por voz en las apps ni dictado.
+# Medido antes de quitarlo: ~120 MB de memoria y entre un 5 y un 20 % de un núcleo de forma continua.
+com.google.android.katniss              # Asistente de Google y búsqueda por voz (botón del micro)
+com.google.android.tv.assistant         # LED del asistente
+
+# AirPlay (2026-11-22, opcional). Medido antes: ~110 MB entre sus procesos y ~6 % de CPU continuo.
+# Sin él no se puede enviar desde iPhone, iPad o Mac; Chromecast (mediashell) sigue.
+com.tcl.airplay2                        # AirPlay de TCL
+com.mediatek.AirplayAPK                 # AirPlay (servicio de MediaTek)
+
+# Gboard (2026-11-23): esta TV usa el teclado de TCL; Gboard solo ocupaba memoria (~40 MB).
+com.google.android.inputmethod.latin    # teclado de Google (no es el activo)

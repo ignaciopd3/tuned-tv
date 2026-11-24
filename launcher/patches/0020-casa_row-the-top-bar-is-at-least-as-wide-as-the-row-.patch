@@ -1,0 +1,65 @@
+From 1d54b69e640bff1510e3ec39f0d05338bf488a78 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 21:48:53 +0100
+Subject: [PATCH 20/23] casa_row: the top bar is at least as wide as the row,
+ with fixed room for the values
+
+The row took the top bar's width, so on a TV whose bar has few buttons (a Fire TV
+without the inputs pill) the humidity was cut off. The bar now grows to the row's
+width; the header beside it gives up that space and the top buttons sit centred.
+Temperature and humidity keep room for their widest values, so nothing moves
+when they change.
+---
+ .../src/main/java/com/gathin/tvhome/CasaRow.java   | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+index bf78ed1..6ddd61e 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+@@ -112,10 +112,10 @@ final class CasaRow {
+         climate.setGravity(Gravity.CENTER_VERTICAL);
+         climate.setFocusable(false);
+         climate.addView(icon(R.drawable.ic_casa_thermo));
+-        temperature = value();
++        temperature = value("88,8°");
+         climate.addView(temperature);
+         climate.addView(icon(R.drawable.ic_casa_drop));
+-        humidity = value();
++        humidity = value("100 %");
+         climate.addView(humidity);
+         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, px(42));
+         clp.setMarginStart(px(8));
+@@ -127,6 +127,12 @@ final class CasaRow {
+         rlp.addRule(RelativeLayout.ALIGN_START, bar.getId());
+         rlp.addRule(RelativeLayout.ALIGN_END, bar.getId());
+         ((RelativeLayout) bar.getParent()).addView(row, rlp);
++        // The row takes the top bar's width, so where the bar has few buttons (a Fire TV: no inputs pill, no VPN app)
++        // the humidity was cut off. The bar is now at least as wide as the row; the header beside it fills what the
++        // bar leaves, so it gives up that space, and the top buttons sit centred over the wider row.
++        row.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
++        bar.setMinimumWidth(row.getMeasuredWidth());
++        bar.setGravity(Gravity.CENTER_HORIZONTAL);
+     }
+ 
+     /** An icon-only top button, the same style and size as the ones above it. */
+@@ -161,13 +167,15 @@ final class CasaRow {
+         return i;
+     }
+ 
+-    private TextView value() {
++    /** Room for {@code widest} from the start, so the row and the capsules beside it keep their width as values change. */
++    private TextView value(String widest) {
+         TextView t = new TextView(activity);
+         t.setTextColor(0xFFFFFFFF);
+         t.setTextSize(15);
+         t.setText("—");
+         t.setSingleLine(true);   // "60 %" wrapped into three lines when the row ran out of room
+         t.setPaddingRelative(0, 0, px(4), 0);
++        t.setMinWidth((int) Math.ceil(t.getPaint().measureText(widest)) + px(4));
+         return t;
+     }
+ 
+-- 
+2.54.0.windows.1
+

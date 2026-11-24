@@ -1,0 +1,81 @@
+{
+  "live_tv_package": "com.tcl.tv",
+  "live_tv_input_id": "com.tcl.tvinput/.TDTVInputService/HW1413742848",
+  "app_labels": [
+    "com.tcl.tv=TDT"
+  ],
+  "app_banners": [
+    "com.tcl.tv=banner_tdt_glass"
+  ],
+  "launch_actions": [
+    "com.tcl.tv=view:content://android.media.tv/channel?input=com.tcl.tvinput%2F.TDTVInputService%2FHW1413742848"
+  ],
+  "app_keys": [
+    "4001:input:com.tcl.tvinput/.TDTVInputService/HW1413742848",
+    "172:input:com.tcl.tvinput/.TDTVInputService/HW1413742848",
+    "4062:com.netflix.ninja",
+    "4065:com.google.android.youtube.tv",
+    "4099:com.amazon.amazonvideo.livingroom",
+    "4137:input:com.tcl.tvinput/.passthroughinput.TvPassThroughService/HW1413744128",
+    "4159:input:com.tcl.tvinput/.passthroughinput.TvPassThroughService/HW1413744384"
+  ],
+  "dock_apps": [
+    "com.tcl.tv",
+    "com.google.android.youtube.tv",
+    "com.netflix.ninja",
+    "com.amazon.amazonvideo.livingroom",
+    "com.disney.disneyplus",
+    "com.spotify.tv.android"
+  ],
+  "hidden_apps": [
+    "io.github.sumyabazar1.weather",
+    "io.github.maxhayim.headphones",
+    "com.gathin.btconnect",
+    "io.github.maxhayim.remoteaccess"
+  ],
+  "app_library": true,
+  "library_button": true,
+  "show_library_pill": false,
+  "library_ok_opens": true,
+  "library_excluded_apps": [
+    "com.tcl.settings",
+    "com.tcl.tcl_bt_rcu_service"
+  ],
+  "weather_app": "io.github.sumyabazar1.weather",
+  "adb_warning": true,
+  "header_capsule": true,
+  "top_bar_capsule": true,
+  "date_on_top": true,
+  "vpn_pill": false,
+  "fill_dock": false,
+  "columns": 7,
+  "rows_below_dock": 1,
+  "single_row": true,
+  "dock_band_all": true,
+  "inputs_connected_only": true,
+  "consume_volume_keys": true,
+  "background_color": "#05070C",
+  "wallpaper": true,
+  "wallpaper_rotation_minutes": 30,
+  "wallpaper_order": "shuffle",
+  "wallpaper_captions": false,
+  "wallpaper_true_color": false,
+  "wallpaper_dim": 14,
+  "cinematic_home": false,
+  "dock_title": true,
+  "dock_glass": false,
+  "dock_opacity": 62,
+  "dock_even_padding": true,
+  "icon_only_buttons": true,
+  "icon_only_inputs": true,
+  "ambient_glow": false,
+  "app_glow": false,
+  "clock_wallpaper": true,
+  "clock_wallpaper_dim": 35,
+  "home_idle_clock_minutes": 3,
+  "reduced_motion": true,
+  "focus_overshoot": false,
+  "glow_snap": true,
+  "fade_rows": false,
+  "advanced_effects": false
+}

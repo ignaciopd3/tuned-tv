@@ -1,0 +1,31 @@
+[project]
+name = "tvopt"
+version = "0.1.0"
+description = "Conectar, limpiar y optimizar teles (Android TV, Fire OS, webOS, Tizen) desde cualquier equipo"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.8", "pyright>=1.1.390"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+include = ["run.py", "tvopt/**/*.py", "tests/**/*.py", "private/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["run.py", "tvopt", "tests"]
+extraPaths = ["tools"]
+strict = ["tvopt"]
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

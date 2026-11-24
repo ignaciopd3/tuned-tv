@@ -1,0 +1,30 @@
+name: Bug / Fallo
+description: Something did not work as described · Algo no funcionó como se describe
+labels: ["bug"]
+body:
+  - type: input
+    id: profile
+    attributes:
+      label: Profile and TV / Perfil y tele
+      placeholder: "fire-tv-4k-max-aftka on a Fire TV Stick 4K Max"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran / Orden que lanzaste
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected / Qué pasó y qué esperabas
+      description: Include the output; replace IP addresses with <tv-ip> · Incluye la salida; cambia las IPs por <tv-ip>
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your computer / Tu ordenador
+      placeholder: "Windows 11, uv 0.9, adb 36"

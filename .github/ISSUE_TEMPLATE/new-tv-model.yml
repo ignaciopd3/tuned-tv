@@ -1,0 +1,60 @@
+name: New TV model / Nuevo modelo de tele
+description: Your TV is not in profiles/ yet, or you are adding it · Tu tele aún no está en profiles/, o la estás añadiendo
+title: "[TV] <brand> <model>"
+labels: ["new model"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! This collects what is needed for a profile. **Do not paste IP addresses, serial numbers, e-mails or account names.**
+        ¡Gracias! Esto reúne lo necesario para un perfil. **No pegues IPs, números de serie, correos ni nombres de cuentas.**
+  - type: input
+    id: brand_model
+    attributes:
+      label: Brand and model / Marca y modelo
+      placeholder: "TCL 55C845, Sony KD-55X85J, Fire TV Stick 4K Max…"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System / Sistema
+      options:
+        - Android TV
+        - Google TV
+        - Fire OS
+        - LG webOS
+        - Samsung Tizen
+        - Other / Otro
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: System version / Versión del sistema
+      description: "adb shell getprop ro.build.version.release (Fire OS: Settings → My Fire TV → About)"
+  - type: textarea
+    id: props
+    attributes:
+      label: Identifying properties / Propiedades que lo identifican
+      description: |
+        Output of / Salida de:
+        adb shell getprop ro.product.manufacturer ; adb shell getprop ro.product.model ; adb shell getprop ro.product.name ; adb shell getprop ro.board.platform
+      render: text
+  - type: textarea
+    id: connection
+    attributes:
+      label: How did you connect? / ¿Cómo te conectaste?
+      description: Menu path to developer options, USB / network / wireless debugging, anything unusual · Ruta a las opciones para desarrolladores, depuración USB, de red o inalámbrica, lo que fuera raro
+  - type: textarea
+    id: tested
+    attributes:
+      label: What did you test? / ¿Qué has probado?
+      description: Dry-run plan, what you applied, what still works (Wi-Fi, HDMI, tuner, sound, remote, apps, casting) and measurements before/after · Plan de la simulación, qué aplicaste, qué sigue funcionando y medidas de antes y después
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy / Privacidad
+      options:
+        - label: This issue contains no IP addresses, serials, e-mails or account names · Esta issue no tiene IPs, números de serie, correos ni cuentas
+          required: true

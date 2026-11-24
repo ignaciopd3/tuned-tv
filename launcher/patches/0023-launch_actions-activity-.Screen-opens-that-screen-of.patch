@@ -1,0 +1,81 @@
+From bc40555264298b8fa3bbd9ec12efd2b86757c0dc Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 08:22:15 +0100
+Subject: [PATCH 23/23] launch_actions: "activity:.Screen" opens that screen of
+ the app (the Fire TV Appstore's store front)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/LaunchActions.java    | 16 +++++++++++++++-
+ launcher/app/src/main/res/values/config.xml      |  4 +++-
+ .../com/gathin/tvhome/LaunchActionsTest.java     | 13 +++++++++++++
+ 3 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/LaunchActions.java b/launcher/app/src/main/java/com/gathin/tvhome/LaunchActions.java
+index 453d294..4daf620 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/LaunchActions.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/LaunchActions.java
+@@ -37,8 +37,22 @@ final class LaunchActions {
+         return uri.isEmpty() ? null : uri;
+     }
+ 
+-    /** The intent for a launch_actions value, limited to its package: ACTION_VIEW on the URI, or the action. */
++    /** A launch_actions value "activity:<class>" opens that screen of the package; ".Name" is short for its own. */
++    static final String ACTIVITY_PREFIX = "activity:";
++
++    /** The full class name of an "activity:<class>" value, or null for anything else. */
++    static String activityClass(String pkg, String value) {
++        if (value == null || !value.startsWith(ACTIVITY_PREFIX)) return null;
++        String cls = value.substring(ACTIVITY_PREFIX.length()).trim();
++        if (cls.isEmpty()) return null;
++        return cls.startsWith(".") ? pkg + cls : cls;
++    }
++
++    /** The intent for a launch_actions value, limited to its package: that activity, ACTION_VIEW on the URI, or the
++     *  action. */
+     static Intent intent(String pkg, String value) {
++        String cls = activityClass(pkg, value);
++        if (cls != null) return new Intent(Intent.ACTION_MAIN).setClassName(pkg, cls);
+         String uri = viewUri(value);
+         Intent i = uri != null ? new Intent(Intent.ACTION_VIEW, Uri.parse(uri)) : new Intent(value);
+         return i.setPackage(pkg);
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index e0ee948..7f9c564 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -83,7 +83,9 @@
+          the tile (and a top_bar_apps button) switch to that TV input instead (ids from dumpsys tv_input), e.g. a Live TV tile straight to
+          HDMI 1: com.mediatek.wwtv.tvcenter=input:com.mediatek.tvinput/.hdmi.HDMIInputService/HW5. "package=view:uri"
+          opens that URI in the package instead (ACTION_VIEW): Bbox TV's live channels are
+-         fr.bouyguestelecom.tv.bbui=view:bbox://live. -->
++         fr.bouyguestelecom.tv.bbui=view:bbox://live. "package=activity:.Screen" opens that activity of the package
++         (".Screen" is short for package.Screen): the Fire TV Appstore's launcher entry is the "Your apps" grid, its
++         store front com.amazon.venezia=activity:.ade.ADEHomeActivity. -->
+     <string-array name="launch_actions">
+     </string-array>
+ 
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/LaunchActionsTest.java b/launcher/app/src/test/java/com/gathin/tvhome/LaunchActionsTest.java
+index f27fa79..f1e3a1e 100644
+--- a/launcher/app/src/test/java/com/gathin/tvhome/LaunchActionsTest.java
++++ b/launcher/app/src/test/java/com/gathin/tvhome/LaunchActionsTest.java
+@@ -62,4 +62,17 @@ public class LaunchActionsTest {
+         assertNull(LaunchActions.inputId("input:"));
+         assertNull(LaunchActions.inputId("input:   "));
+     }
++
++    @Test public void activityPrefixGivesTheClassInThePackage() {
++        assertEquals("com.amazon.venezia.ade.ADEHomeActivity",
++                LaunchActions.activityClass("com.amazon.venezia", "activity:.ade.ADEHomeActivity"));
++        assertEquals("org.other.Main", LaunchActions.activityClass("com.amazon.venezia", "activity: org.other.Main "));
++    }
++
++    @Test public void activityClassIsNullForEverythingElse() {
++        assertNull(LaunchActions.activityClass("p", "activity:"));
++        assertNull(LaunchActions.activityClass("p", "view:bbox://live"));
++        assertNull(LaunchActions.activityClass("p", "FEATURED_LAUNCH"));
++        assertNull(LaunchActions.activityClass("p", null));
++    }
+ }
+-- 
+2.54.0.windows.1
+

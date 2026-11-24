@@ -1,0 +1,4 @@
+# Nivel precaución: solo con --include-caution y con el OK explícito del dueño.
+# Formato: paquete [disable|uninstall]   # motivo
+# Aquí van: actualizaciones (OTA), imagen y sonido, voz, casting y apps preinstaladas que el dueño puede usar.
+# Lo que el dueño decide conservar se deja comentado con «# KEEP paquete   # motivo».

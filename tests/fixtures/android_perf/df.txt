@@ -1,0 +1,2 @@
+Filesystem       1K-blocks    Used Available Use% Mounted on
+/dev/block/dm-12  23090956 6351596  16591904  28% /data/user/0

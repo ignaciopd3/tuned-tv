@@ -1,0 +1,28 @@
+From 51e11da5e32b4ec0cdfefa902cba52870c4d4951 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 10:43:42 +0100
+Subject: [PATCH 12/23] Launcher may open the Casa add-on's switches (its
+ signature permission)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ launcher/app/src/main/AndroidManifest.xml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/launcher/app/src/main/AndroidManifest.xml b/launcher/app/src/main/AndroidManifest.xml
+index ca18afa..ecd450e 100644
+--- a/launcher/app/src/main/AndroidManifest.xml
++++ b/launcher/app/src/main/AndroidManifest.xml
+@@ -21,6 +21,9 @@
+     <!-- YaOS (Yandex TV OS): HDMI, AV and the tuner all play in com.yandex.tv.live, whose activities require
+          this permission (protection level normal, so it is granted at install). Ignored on other TVs. -->
+     <uses-permission android:name="yandex.tv.permission.ACCESS_TV_SOURCE" />
++    <!-- The Casa add-on's switches (app_keys "io.github.ignaciopd3.casa/.LuzActivity"): signature level, so only a
++         Casa built with the same key grants it. Nothing changes where Casa is not installed. -->
++    <uses-permission android:name="io.github.ignaciopd3.casa.permission.CONTROL" />
+ 
+     <!-- Android 11+ package visibility: lets the launcher list the TV apps it shows as tiles, and the
+          apps that declare a module card (docs/specs/card.md). -->
+-- 
+2.54.0.windows.1
+

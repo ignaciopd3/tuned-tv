@@ -1,0 +1,109 @@
+From 27fb6ac3ad02ece05f8d682c11659268557dbb08 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 23:37:07 +0100
+Subject: [PATCH 10/23] Remote Access: OK twice also switches network debugging
+ on
+
+With WRITE_SECURE_SETTINGS already granted for the off button, the same row
+switches adb_enabled back on while it is off, so a session needs no trip
+through Developer options. Home's ADB warning shows while it is on.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ addons/remote-access/README.md                |  8 ++++---
+ .../maxhayim/remoteaccess/MainActivity.java   | 22 ++++++++++++-------
+ 2 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/addons/remote-access/README.md b/addons/remote-access/README.md
+index e305b89..b9c38b0 100644
+--- a/addons/remote-access/README.md
++++ b/addons/remote-access/README.md
+@@ -11,19 +11,21 @@ glow. On any other Android TV home it is an ordinary app.
+ 
+ | Row | What it does |
+ |---|---|
+-| **Network debugging (ADB)** | Off, USB only, On (port 5555) or Wireless debugging. Focused first. OK twice within five seconds switches it off, which also ends any ADB session in progress. |
++| **Network debugging (ADB)** | Off, USB only, On (port 5555) or Wireless debugging. Focused first. OK twice within five seconds switches it off, which also ends any ADB session in progress, or on while it is off. |
+ | **This TV's address** | Its IPv4 address on the home network. |
+ | **Tailscale** | Not installed, Installed and not connected, or Connected with its 100.x address. OK opens Tailscale. |
+ | **Developer options** | Opens them, where debugging is switched on again. |
+ 
+-It never switches debugging on: that stays in the TV's own Developer options.
++In this build, OK twice on the same row also switches debugging on, so it can be opened for a session without a
++trip through the TV's settings (upstream keeps that in Developer options on purpose). Home's red ADB warning
++shows while it is on.
+ 
+ ## Permissions
+ 
+ | Permission | Why |
+ |---|---|
+ | `ACCESS_NETWORK_STATE` | The TV's addresses, and whether a VPN such as Tailscale is up. |
+-| `WRITE_SECURE_SETTINGS` | Only to switch network debugging off. Android lets only ADB grant it; `install.sh` does. Without it the button opens Developer options instead. |
++| `WRITE_SECURE_SETTINGS` | Only to switch network debugging off and on. Android lets only ADB grant it; `install.sh` does. Without it the button opens Developer options instead. |
+ 
+ It reads `adb_enabled`, `adb_wifi_enabled` and the `service.adb.tcp.port` property, the same values the TV's
+ settings show. Package visibility is limited to `com.tailscale.ipn`. No internet permission: nothing leaves the
+diff --git a/addons/remote-access/app/src/main/java/io/github/maxhayim/remoteaccess/MainActivity.java b/addons/remote-access/app/src/main/java/io/github/maxhayim/remoteaccess/MainActivity.java
+index 749c146..e0f631a 100644
+--- a/addons/remote-access/app/src/main/java/io/github/maxhayim/remoteaccess/MainActivity.java
++++ b/addons/remote-access/app/src/main/java/io/github/maxhayim/remoteaccess/MainActivity.java
+@@ -24,7 +24,7 @@ import java.net.Inet4Address;
+ /**
+  * The tile and module card open this: whether the TV can be controlled over the network, from where, and one
+  * press to close it. It reads what Android already shows in Settings and changes one setting, network
+- * debugging, and only to switch it off.
++ * debugging: off, and in this build also on, both with OK twice.
+  */
+ public class MainActivity extends Activity {
+     private static final long CONFIRM_MS = 5000;
+@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
+     private final Handler main = new Handler(Looper.getMainLooper());
+     private TextView status;
+     private Row adbRow, addressRow, tailscaleRow;
+-    /** OK pressed once on the debugging row: a second press within CONFIRM_MS switches it off. */
++    /** OK pressed once on the debugging row: a second press within CONFIRM_MS switches it off, or on when it is off. */
+     private boolean armed;
+     private final Runnable disarm = () -> {
+         armed = false;
+@@ -96,9 +96,11 @@ public class MainActivity extends Activity {
+         boolean wireless = global("adb_wifi_enabled") == 1;
+         int port = Access.port(prop("service.adb.tcp.port"));
+         Access.Adb adb = Access.adb(enabled, wireless, port);
+-        adbRow.setValue(armed ? "OK again: off" : Access.adbValue(adb, wireless, port));
+-        if (adb == Access.Adb.OFF) {
+-            adbRow.setDetail("Nobody can control this TV over the network.");
++        boolean off = adb == Access.Adb.OFF;
++        adbRow.setValue(armed ? (off ? "OK again: on" : "OK again: off") : Access.adbValue(adb, wireless, port));
++        if (off) {
++            adbRow.setDetail(canWrite() ? "Nobody can control this TV over the network. OK twice switches it on."
++                    : "Nobody can control this TV over the network.");
+         } else if (!canWrite()) {
+             adbRow.setDetail("Switch it off in Developer options (OK opens them). install.sh lets this button do it.");
+         } else {
+@@ -116,7 +118,6 @@ public class MainActivity extends Activity {
+ 
+     private void adbPressed() {
+         boolean on = global("adb_enabled") == 1 || global("adb_wifi_enabled") == 1;
+-        if (!on) return;
+         if (!canWrite()) {
+             open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+             return;
+@@ -130,8 +131,13 @@ public class MainActivity extends Activity {
+         main.removeCallbacks(disarm);
+         armed = false;
+         try {
+-            Settings.Global.putInt(getContentResolver(), "adb_wifi_enabled", 0);
+-            Settings.Global.putInt(getContentResolver(), Settings.Global.ADB_ENABLED, 0);
++            if (on) {
++                Settings.Global.putInt(getContentResolver(), "adb_wifi_enabled", 0);
++                Settings.Global.putInt(getContentResolver(), Settings.Global.ADB_ENABLED, 0);
++            } else {
++                // The developer-options switch; firmware that keeps an adb tcpip port (Android TV) listens on it again.
++                Settings.Global.putInt(getContentResolver(), Settings.Global.ADB_ENABLED, 1);
++            }
+         } catch (SecurityException e) {
+             open(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+         }
+-- 
+2.54.0.windows.1
+

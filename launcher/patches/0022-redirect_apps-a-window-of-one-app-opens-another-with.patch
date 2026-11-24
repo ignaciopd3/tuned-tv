@@ -1,0 +1,202 @@
+From 72986a312bffddd1c579adee18d3c6075a752814 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 07:49:58 +0100
+Subject: [PATCH 22/23] redirect_apps: a window of one app opens another, with
+ Home underneath (Fire OS's TV button opens Live TV itself)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../main/java/com/gathin/tvhome/Config.java   | 11 ++++-
+ .../com/gathin/tvhome/HomeKeyService.java     | 42 ++++++++++++++++++-
+ launcher/app/src/main/res/values/config.xml   |  9 ++++
+ .../com/gathin/tvhome/HomeKeyServiceTest.java | 17 ++++++++
+ 4 files changed, 76 insertions(+), 3 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 96baffd..52db3c4 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -204,6 +204,8 @@ final class Config {
+     final boolean homeIgnoreChannelKeys;
+     /** Stock launcher whose home screen is sent back here if the firmware revives it (config.xml stock_home_redirect). */
+     final String stockHomeRedirect;
++    /** "from.package:to.package" entries: a window of the first opens the second instead (config.xml redirect_apps). */
++    final List<String> redirectApps;
+     /** A Live TV window the firmware opens by itself at power-on is sent back to Home (power_on_home). */
+     final boolean powerOnHome;
+     /** Every Home press opens this launcher, a held one too, instead of Android's long-press action (home_long_press_home). */
+@@ -317,7 +319,9 @@ final class Config {
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+                    boolean settingsKeyClearTask, String weatherApp, boolean adbWarning,
+-                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp, String casaRow, boolean dateOnTop) {
++                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp, String casaRow, boolean dateOnTop,
++                   List<String> redirectApps) {
++        this.redirectApps = Collections.unmodifiableList(redirectApps);
+         this.casaRow = casaRow;
+         this.dateOnTop = dateOnTop;
+         this.weatherApp = weatherApp;
+@@ -543,6 +547,7 @@ final class Config {
+         boolean handleViewInputs = res.getBoolean(R.bool.handle_view_inputs);
+         List<String> appKeys = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.app_keys)));
+         String stockHomeRedirect = res.getString(R.string.stock_home_redirect).trim();
++        List<String> redirectApps = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.redirect_apps)));
+         boolean cinematic = res.getBoolean(R.bool.cinematic_home);
+         boolean ambientGlow = res.getBoolean(R.bool.ambient_glow);
+         boolean appGlow = res.getBoolean(R.bool.app_glow);
+@@ -667,6 +672,7 @@ final class Config {
+             handleViewInputs = bool(json, "handle_view_inputs", handleViewInputs);
+             appKeys = stringList(json, "app_keys", appKeys);
+             stockHomeRedirect = string(json, "stock_home_redirect", stockHomeRedirect);
++            redirectApps = stringList(json, "redirect_apps", redirectApps);
+             cinematic = bool(json, "cinematic_home", cinematic);
+             ambientGlow = bool(json, "ambient_glow", ambientGlow);
+             appGlow = bool(json, "app_glow", appGlow);
+@@ -771,7 +777,8 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp, casaRow, dateOnTop);
++                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp, casaRow, dateOnTop,
++                redirectApps);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+index 4195a33..80b7342 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+@@ -32,7 +32,9 @@ import android.view.accessibility.AccessibilityEvent;
+ import android.widget.Toast;
+ 
+ import java.util.Collections;
++import java.util.HashMap;
+ import java.util.HashSet;
++import java.util.List;
+ import java.util.Map;
+ import java.util.Set;
+ 
+@@ -97,6 +99,8 @@ public class HomeKeyService extends AccessibilityService {
+     /** app_keys "front:" entries; the package in front goes to RemoteKeys.frontPackage, for both helpers. */
+     private Map<Integer, String> frontAppKeys = Collections.emptyMap();
+     private Map<Integer, String> frontAppScancodes = Collections.emptyMap();
++    /** redirect_apps: a window of a key package opens its value instead (Fire OS's TV button opens Live TV itself). */
++    private Map<String, String> redirectApps = Collections.emptyMap();
+     /** power_on_home_always: Home at every power-on, not only over Live TV. */
+     private boolean powerOnAlways;
+     /** power_on_home: re-arms after the screen turns on; null unless the key is on. */
+@@ -218,6 +222,7 @@ public class HomeKeyService extends AccessibilityService {
+         homeLongPressHome = config.homeLongPressHome;
+         frontAppKeys = RemoteKeys.parseFrontAppKeys(config.appKeys);
+         frontAppScancodes = RemoteKeys.parseFrontAppScancodes(config.appKeys);
++        redirectApps = parseRedirects(config.redirectApps);
+         boolean watchFront = !frontAppKeys.isEmpty() || !frontAppScancodes.isEmpty();
+         stockHome.clear();
+         stockHomePackage = config.stockHomeRedirect;
+@@ -249,7 +254,7 @@ public class HomeKeyService extends AccessibilityService {
+         }
+         // home_key_service.xml subscribes to no events, so the redirects ask for window changes only when one is on.
+         AccessibilityServiceInfo info = getServiceInfo();
+-        if (info != null && (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty() || watchFront)) {
++        if (info != null && (!stockHome.isEmpty() || !powerOnLiveTv.isEmpty() || watchFront || !redirectApps.isEmpty())) {
+             info.eventTypes |= AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+             // setServiceInfo() rewrites flags and drops the XML's flagRequestFilterKeyEvents, so a
+             // key_filter build that also uses a window-watching redirect loses key filtering (gear/app
+@@ -368,6 +373,41 @@ public class HomeKeyService extends AccessibilityService {
+             if (onStockHome) redirectStockHome();
+             else if (!getPackageName().contentEquals(pkg)) cancelStockRedirect();
+         }
++        String to = pkg == null ? null : redirectApps.get(pkg.toString());
++        if (to != null) redirectApp(to);
++    }
++
++    /** redirect_apps: this launcher underneath, then the app, so Back from the app comes Home; the screen just left
++     *  stays in the task behind, and coming back to it would only redirect again. Each later window of that app (its
++     *  splash, then the page it opens from there) asks again, which just brings both tasks forward once more. */
++    private void redirectApp(String target) {
++        Intent open;
++        ComponentName activity = RemoteKeys.isActivity(target) ? ComponentName.unflattenFromString(target) : null;
++        if (activity != null) {
++            open = new Intent().setComponent(activity);
++        } else {
++            open = getPackageManager().getLeanbackLaunchIntentForPackage(target);
++            if (open == null) open = getPackageManager().getLaunchIntentForPackage(target);
++            if (open == null) return;
++        }
++        try {
++            startActivities(new Intent[] {homeIntent(), open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)});
++        } catch (ActivityNotFoundException | SecurityException ignored) {
++        }
++    }
++
++    /** redirect_apps entries, "from.package:target"; blank, half and self-pointing entries are skipped. */
++    static Map<String, String> parseRedirects(List<String> entries) {
++        Map<String, String> to = new HashMap<>();
++        for (String entry : entries) {
++            int colon = entry.indexOf(':');
++            if (colon < 0) continue;
++            String from = entry.substring(0, colon).trim(), target = entry.substring(colon + 1).trim();
++            if (!from.isEmpty() && !target.isEmpty() && !target.equals(from) && !target.startsWith(from + "/")) {
++                to.put(from, target);
++            }
++        }
++        return to;
+     }
+ 
+     /** System UI, a system dialog or this app's own non-activity window (the cover): the app in front stays. */
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 46dfe77..e0ee948 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -253,6 +253,15 @@
+          straight back here. A theme's config.json can set it too. Leave empty to omit. -->
+     <string name="stock_home_redirect" translatable="false"></string>
+ 
++    <!-- Apps sent elsewhere as soon as one of their windows comes up, as "from.package:to.package" (or
++         "from.package:package/.Activity"). Fire OS opens its Live TV app (com.amazon.tv.livetv) by itself for the
++         remote's TV button, and no app ever receives that key, so "com.amazon.tv.livetv:com.example.iptv" makes the
++         button open the IPTV app; no key filter needed. This launcher goes underneath, so Back from that app comes
++         Home and not to the screen just left, which would send it straight back. Needs HomeKeyService. A theme's
++         config.json can set it too. Leave empty to omit. -->
++    <string-array name="redirect_apps" translatable="false">
++    </string-array>
++
+     <!-- For TVs whose firmware opens the Live TV app (live_tv_package) by itself at every power-on, with no setting
+          to change it (Changhong / Homwee boards start com.mediatek.wwtv.tvcenter from its own boot receiver, which
+          adb cannot disable on Android 14). While nobody has pressed a key yet after boot or after the screen turns
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/HomeKeyServiceTest.java b/launcher/app/src/test/java/com/gathin/tvhome/HomeKeyServiceTest.java
+index c1acb3e..64833b2 100644
+--- a/launcher/app/src/test/java/com/gathin/tvhome/HomeKeyServiceTest.java
++++ b/launcher/app/src/test/java/com/gathin/tvhome/HomeKeyServiceTest.java
+@@ -1,6 +1,11 @@
+ package com.gathin.tvhome;
+ 
+ import org.junit.Test;
++
++import java.util.Arrays;
++import java.util.Map;
++
++import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertTrue;
+ 
+@@ -57,4 +62,16 @@ public class HomeKeyServiceTest {
+         assertTrue(HomeKeyService.stillArmed(SOON, SOON + HomeKeyService.SCREEN_ON_WINDOW_MS));
+         assertFalse(HomeKeyService.stillArmed(SOON, 0));
+     }
++
++    @Test public void redirectAppsMapsEachPackageToItsTarget() {
++        Map<String, String> to = HomeKeyService.parseRedirects(Arrays.asList(
++                "com.amazon.tv.livetv:com.example.iptv", " com.a : com.b/.Main "));
++        assertEquals(2, to.size());
++        assertEquals("com.example.iptv", to.get("com.amazon.tv.livetv"));
++        assertEquals("com.b/.Main", to.get("com.a"));
++    }
++
++    @Test public void redirectAppsSkipsBrokenAndSelfEntries() {
++        assertTrue(HomeKeyService.parseRedirects(Arrays.asList("", "nocolon", ":com.b", "com.a:", "com.a:com.a")).isEmpty());
++    }
+ }
+-- 
+2.54.0.windows.1
+

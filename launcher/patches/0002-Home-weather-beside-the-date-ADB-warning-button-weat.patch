@@ -1,0 +1,1262 @@
+From 57c82e12b97d18740a8a54bc87d6c2ad3af4735a Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 23:13:10 +0100
+Subject: [PATCH 02/23] Home weather beside the date, ADB warning button,
+ weather in the clock screensaver
+
+- addons/weather: NowProvider publishes the weather now (no place or position),
+  fetching only when read and the copy is older than 30 min; NowText + tests.
+- launcher: weather_app (WeatherNow, same opt-in and checks as GameDay, whose
+  provider resolution is now shared), adb_warning_app (AdbWarning + tests),
+  weather line in ClockDream, eight weather icons.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../weather/app/src/main/AndroidManifest.xml  |   8 +
+ .../sumyabazar1/weather/NowProvider.java      | 104 ++++++++++++
+ .../github/sumyabazar1/weather/NowText.java   |  35 ++++
+ .../sumyabazar1/weather/NowTextTest.java      |  63 ++++++++
+ .../java/com/gathin/tvhome/AdbWarning.java    |  36 +++++
+ .../java/com/gathin/tvhome/ClockDream.java    |  26 ++-
+ .../main/java/com/gathin/tvhome/Config.java   |  14 +-
+ .../main/java/com/gathin/tvhome/GameDay.java  |  15 +-
+ .../java/com/gathin/tvhome/MainActivity.java  | 105 +++++++++++-
+ .../java/com/gathin/tvhome/WeatherNow.java    | 151 ++++++++++++++++++
+ .../app/src/main/res/drawable/ic_terminal.xml |  10 ++
+ .../main/res/drawable/ic_weather_cloud.xml    |   8 +
+ .../src/main/res/drawable/ic_weather_fog.xml  |  10 ++
+ .../src/main/res/drawable/ic_weather_moon.xml |   8 +
+ .../main/res/drawable/ic_weather_partly.xml   |  12 ++
+ .../src/main/res/drawable/ic_weather_rain.xml |  10 ++
+ .../src/main/res/drawable/ic_weather_snow.xml |  10 ++
+ .../main/res/drawable/ic_weather_storm.xml    |  10 ++
+ .../src/main/res/drawable/ic_weather_sun.xml  |  10 ++
+ .../app/src/main/res/layout/activity_main.xml |  78 +++++++++
+ .../app/src/main/res/layout/dream_clock.xml   |  16 ++
+ .../app/src/main/res/values-es/strings.xml    |   1 +
+ launcher/app/src/main/res/values/config.xml   |  10 ++
+ launcher/app/src/main/res/values/strings.xml  |   1 +
+ .../com/gathin/tvhome/AdbWarningTest.java     |  38 +++++
+ .../com/gathin/tvhome/WeatherNowTest.java     |  53 ++++++
+ 26 files changed, 832 insertions(+), 10 deletions(-)
+ create mode 100644 addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
+ create mode 100644 addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
+ create mode 100644 addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
+ create mode 100644 launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
+ create mode 100644 launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
+ create mode 100644 launcher/app/src/main/res/drawable/ic_terminal.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_cloud.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_fog.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_moon.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_partly.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_rain.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_snow.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_storm.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_weather_sun.xml
+ create mode 100644 launcher/app/src/test/java/com/gathin/tvhome/AdbWarningTest.java
+ create mode 100644 launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
+
+diff --git a/addons/weather/app/src/main/AndroidManifest.xml b/addons/weather/app/src/main/AndroidManifest.xml
+index f713c33..e268923 100644
+--- a/addons/weather/app/src/main/AndroidManifest.xml
++++ b/addons/weather/app/src/main/AndroidManifest.xml
+@@ -30,5 +30,13 @@
+             </intent-filter>
+             <meta-data android:name="com.gathin.tvhome.card" android:resource="@xml/module_card" />
+         </activity>
++
++        <!-- The weather now for a home screen (Clean Your TV's weather_app): read-only, no place name or position.
++             It fetches only when read and the copy is older than 30 minutes. -->
++        <meta-data android:name="com.gathin.tvhome.weather" android:value="io.github.sumyabazar1.weather.now" />
++        <provider
++            android:name=".NowProvider"
++            android:authorities="io.github.sumyabazar1.weather.now"
++            android:exported="true" />
+     </application>
+ </manifest>
+diff --git a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
+new file mode 100644
+index 0000000..f497ab9
+--- /dev/null
++++ b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
+@@ -0,0 +1,104 @@
++package io.github.sumyabazar1.weather;
++
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.content.Context;
++import android.content.SharedPreferences;
++import android.content.res.Resources;
++import android.database.Cursor;
++import android.database.MatrixCursor;
++import android.net.Uri;
++import java.util.Locale;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.atomic.AtomicBoolean;
++
++/**
++ * The weather now, for a home screen that stays offline (Clean Your TV's weather_app): one row of ready-to-show
++ * text from a cached fetch. A read with a copy older than {@link Forecast#REFRESH_MS} fetches in the background and
++ * notifies the URI when done; nothing runs when nobody reads. No place name or position is published.
++ */
++public final class NowProvider extends ContentProvider {
++    static final String AUTHORITY = "io.github.sumyabazar1.weather.now";
++    static final Uri URI = Uri.parse("content://" + AUTHORITY + "/now");
++    private static final String[] COLUMNS = {"temp", "summary", "days", "code", "is_day"};
++    private static final int DAYS_SHOWN = 2;
++
++    private final ExecutorService io = Executors.newSingleThreadExecutor();
++    private final AtomicBoolean fetching = new AtomicBoolean();
++
++    @Override
++    public boolean onCreate() {
++        return true;
++    }
++
++    @Override
++    public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sortOrder) {
++        Context ctx = getContext();
++        MatrixCursor out = new MatrixCursor(COLUMNS, 1);
++        out.setNotificationUri(ctx.getContentResolver(), URI);
++        SharedPreferences place = ctx.getSharedPreferences("place", Context.MODE_PRIVATE);
++        if (!place.contains("name")) return out;
++        long lat = place.getLong("lat", 0);
++        long lon = place.getLong("lon", 0);
++        SharedPreferences now = ctx.getSharedPreferences("now", Context.MODE_PRIVATE);
++        boolean sameCity = now.contains("lat") && now.getLong("lat", 0) == lat && now.getLong("lon", 0) == lon;
++        if (NowText.needsFetch(System.currentTimeMillis(), now.getLong("fetched", 0), now.getLong("tried", 0), sameCity)) {
++            fetch(ctx, now, lat, lon);
++        }
++        if (sameCity) {
++            out.addRow(new Object[] {now.getString("temp", ""), now.getString("summary", ""), now.getString("days", ""),
++                    now.getInt("code", 3), now.getInt("is_day", 1)});
++        }
++        return out;
++    }
++
++    private void fetch(Context ctx, SharedPreferences now, long lat, long lon) {
++        if (!fetching.compareAndSet(false, true)) return;
++        now.edit().putLong("tried", System.currentTimeMillis()).apply();
++        Resources res = ctx.getResources();
++        boolean f = ctx.getSharedPreferences("options", Context.MODE_PRIVATE)
++                .getBoolean("fahrenheit", "f".equalsIgnoreCase(res.getString(R.string.temperature_unit).trim()));
++        io.execute(() -> {
++            try {
++                Forecast.Report r = Forecast.fetch(Double.longBitsToDouble(lat), Double.longBitsToDouble(lon), Forecast.MIN_DAYS);
++                now.edit()
++                        .putLong("lat", lat)
++                        .putLong("lon", lon)
++                        .putLong("fetched", System.currentTimeMillis())
++                        .putString("temp", Forecast.degrees(r.tempC, f) + "°")
++                        .putString("summary", res.getString(Forecast.sky(r.code, r.day)) + " · "
++                                + res.getString(R.string.feels_like, Forecast.degrees(r.feelsC, f)))
++                        .putString("days", NowText.days(r.days, DAYS_SHOWN, Locale.getDefault(), f))
++                        .putInt("code", r.code)
++                        .putInt("is_day", r.day ? 1 : 0)
++                        .apply();
++                ctx.getContentResolver().notifyChange(URI, null);
++            } catch (Exception offline) {
++                // Offline or Open-Meteo down: the last copy stays, and a read after RETRY_MS tries again.
++            } finally {
++                fetching.set(false);
++            }
++        });
++    }
++
++    @Override
++    public String getType(Uri uri) {
++        return null;
++    }
++
++    @Override
++    public Uri insert(Uri uri, ContentValues values) {
++        return null;
++    }
++
++    @Override
++    public int delete(Uri uri, String selection, String[] args) {
++        return 0;
++    }
++
++    @Override
++    public int update(Uri uri, ContentValues values, String selection, String[] args) {
++        return 0;
++    }
++}
+diff --git a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
+new file mode 100644
+index 0000000..ab7c69a
+--- /dev/null
++++ b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
+@@ -0,0 +1,35 @@
++package io.github.sumyabazar1.weather;
++
++import java.time.format.TextStyle;
++import java.util.List;
++import java.util.Locale;
++
++/** The weather in a few words for a home screen (NowProvider): pure, so the JVM tests cover it. */
++final class NowText {
++    private NowText() { }
++
++    /** "mié 17°/15° · jue 16°/9°": the first {@code n} days, short names without the abbreviation dot. */
++    static String days(List<Forecast.Day> days, int n, Locale locale, boolean fahrenheit) {
++        StringBuilder out = new StringBuilder();
++        for (int i = 0; i < Math.min(n, days.size()); i++) {
++            Forecast.Day d = days.get(i);
++            String name = d.date.getDayOfWeek().getDisplayName(TextStyle.SHORT, locale);
++            if (name.endsWith(".")) name = name.substring(0, name.length() - 1);
++            if (out.length() > 0) out.append(" · ");
++            out.append(name).append(' ').append(Forecast.degrees(d.maxC, fahrenheit)).append("°/")
++                    .append(Forecast.degrees(d.minC, fahrenheit)).append('°');
++        }
++        return out.toString();
++    }
++
++    /**
++     * Whether a read should fetch: always for another city, otherwise only once the cache is older than
++     * {@link Forecast#REFRESH_MS} (or from a clock that went back), and not again within {@link Forecast#RETRY_MS}
++     * of the last try, so an offline TV is not asked on every return to Home.
++     */
++    static boolean needsFetch(long now, long fetchedMs, long lastTryMs, boolean sameCity) {
++        if (!sameCity) return true;
++        boolean stale = fetchedMs <= 0 || fetchedMs > now || now - fetchedMs >= Forecast.REFRESH_MS;
++        return stale && (lastTryMs > now || now - lastTryMs >= Forecast.RETRY_MS);
++    }
++}
+diff --git a/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java b/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
+new file mode 100644
+index 0000000..ac3981a
+--- /dev/null
++++ b/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
+@@ -0,0 +1,63 @@
++package io.github.sumyabazar1.weather;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++
++import java.time.LocalDate;
++import java.util.Arrays;
++import java.util.Collections;
++import java.util.List;
++import java.util.Locale;
++import org.junit.Test;
++
++public class NowTextTest {
++    private static final long MIN = 60_000L;
++    private static final List<Forecast.Day> DAYS = Arrays.asList(
++            new Forecast.Day(LocalDate.of(2026, 11, 18), 63, 17.2, 14.6),
++            new Forecast.Day(LocalDate.of(2026, 11, 19), 80, 15.6, 9.4),
++            new Forecast.Day(LocalDate.of(2026, 11, 20), 3, 14.0, 8.0));
++
++    @Test
++    public void daysJoinsTheFirstOnesWithoutTheAbbreviationDot() {
++        assertEquals("mié 17°/15° · jue 16°/9°", NowText.days(DAYS, 2, new Locale("es", "ES"), false));
++    }
++
++    @Test
++    public void daysInFahrenheitAndEnglish() {
++        assertEquals("Wed 63°/58°", NowText.days(DAYS, 1, Locale.US, true));
++    }
++
++    @Test
++    public void daysWithFewerThanAskedShowsWhatThereIs() {
++        assertEquals("", NowText.days(Collections.emptyList(), 2, Locale.US, false));
++        assertEquals("Wed 17°/15° · Thu 16°/9° · Fri 14°/8°", NowText.days(DAYS, 5, Locale.US, false));
++    }
++
++    @Test
++    public void fetchesWithoutCacheOrForAnotherCity() {
++        long now = 1_000 * MIN;
++        assertTrue(NowText.needsFetch(now, 0, 0, true));
++        assertTrue(NowText.needsFetch(now, now - MIN, now - MIN, false));
++    }
++
++    @Test
++    public void freshCacheIsServedAsIs() {
++        long now = 1_000 * MIN;
++        assertFalse(NowText.needsFetch(now, now - 29 * MIN, now - 29 * MIN, true));
++    }
++
++    @Test
++    public void staleCacheFetchesUnlessATryWasRecent() {
++        long now = 1_000 * MIN;
++        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 31 * MIN, true));
++        assertFalse(NowText.needsFetch(now, now - 31 * MIN, now - 2 * MIN, true));
++        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 6 * MIN, true));
++    }
++
++    @Test
++    public void aClockThatWentBackCountsAsStale() {
++        long now = 1_000 * MIN;
++        assertTrue(NowText.needsFetch(now, now + 60 * MIN, now + 60 * MIN, true));
++    }
++}
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java b/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
+new file mode 100644
+index 0000000..b5c0d8c
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
+@@ -0,0 +1,36 @@
++package com.gathin.tvhome;
++
++/**
++ * adb_warning_app (config.xml or a theme): a red button in the top bar while ADB can be reached over the network,
++ * opening the named app (such as Remote Access) to switch it off. Same rule as that add-on: wireless debugging,
++ * or the developer switch on with a TCP port (adb tcpip). USB only, or a port left over with the switch off, is
++ * not network ADB.
++ */
++final class AdbWarning {
++    private AdbWarning() { }
++
++    static boolean network(boolean enabled, boolean wireless, int tcpPort) {
++        return wireless || (enabled && tcpPort > 0);
++    }
++
++    /** android.os.SystemProperties is hidden but readable; empty when the firmware refuses it. */
++    static String prop(String name) {
++        try {
++            Object v = Class.forName("android.os.SystemProperties").getMethod("get", String.class).invoke(null, name);
++            return v instanceof String ? (String) v : "";
++        } catch (ReflectiveOperationException | RuntimeException e) {
++            return "";
++        }
++    }
++
++    /** -1 for an unset, empty or odd service.adb.tcp.port value. */
++    static int port(String prop) {
++        if (prop == null) return -1;
++        try {
++            int p = Integer.parseInt(prop.trim());
++            return p > 0 && p < 65536 ? p : -1;
++        } catch (NumberFormatException e) {
++            return -1;
++        }
++    }
++}
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+index bbf8ab8..b6ccc18 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+@@ -1,6 +1,10 @@
+ package com.gathin.tvhome;
+ 
++import android.os.Handler;
++import android.os.Looper;
+ import android.service.dreams.DreamService;
++import android.view.View;
++import android.widget.TextView;
+ 
+ /**
+  * Screensaver: the launcher's thin clock and date on black, over a slow ambient glow (ClockScene).
+@@ -9,6 +13,8 @@ import android.service.dreams.DreamService;
+ public class ClockDream extends DreamService {
+ 
+     private ClockScene scene;
++    /** weather_app: the weather under the date; null when the key is off. */
++    private WeatherNow weather;
+ 
+     @Override
+     protected void attachBaseContext(android.content.Context base) {
+@@ -22,26 +28,44 @@ public class ClockDream extends DreamService {
+         setFullscreen(true);
+         setScreenBright(false);
+         setContentView(R.layout.dream_clock);
+-        ClockFormat.apply(getWindow().getDecorView(), Config.load(this).clockFormat);
++        Config cfg = Config.load(this);
++        ClockFormat.apply(getWindow().getDecorView(), cfg.clockFormat);
+         scene = new ClockScene(getWindow().getDecorView());
+         scene.useHomeWallpaper(this);
++        weather = WeatherNow.create(this, cfg.weatherApp, new Handler(Looper.getMainLooper()), this::showWeather);
+     }
+ 
+     @Override
+     public void onDreamingStarted() {
+         super.onDreamingStarted();
+         scene.start();
++        if (weather != null) weather.start();
+     }
+ 
+     @Override
+     public void onDreamingStopped() {
+         scene.stop();
++        if (weather != null) weather.stop();
+         super.onDreamingStopped();
+     }
+ 
+     @Override
+     public void onDetachedFromWindow() {
+         if (scene != null) scene.stop();
++        if (weather != null) weather.shutdown();
+         super.onDetachedFromWindow();
+     }
++
++    /** weather_app: the reading under the date, gone until there is one. */
++    private void showWeather() {
++        TextView line = getWindow().getDecorView().findViewById(R.id.dreamWeather);
++        WeatherNow.Now now = weather == null ? null : weather.now();
++        if (now == null) {
++            line.setVisibility(View.GONE);
++            return;
++        }
++        line.setText(now.summary.isEmpty() ? now.temp : now.temp + " · " + now.summary);
++        line.setCompoundDrawablesRelativeWithIntrinsicBounds(WeatherNow.icon(now.code, now.day), 0, 0, 0);
++        line.setVisibility(View.VISIBLE);
++    }
+ }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 0d336c9..0c6b167 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -140,6 +140,10 @@ final class Config {
+     final boolean glowSnap;
+     /** The remote's Settings button clears the TV Settings task before opening it (config.xml / theme settings_key_clear_task). */
+     final boolean settingsKeyClearTask;
++    /** weather_app: the add-on whose weather shows beside the date and in the clock screensaver; empty = off. */
++    final String weatherApp;
++    /** adb_warning_app: the app the red ADB button opens; empty = no button. */
++    final String adbWarningApp;
+     /** App library as a round button in the top bar (config.xml library_button); needs app_library. */
+     final boolean libraryButton;
+     /** The App library pill after the last Home row; false hides it while libraryButton is on (show_library_pill). */
+@@ -299,7 +303,9 @@ final class Config {
+                    boolean handleViewInputs, boolean tileMenu, boolean dockEvenPadding, boolean dockBand, boolean cinematicDots, boolean cinematicWhiteFocus, boolean wifiStatusColor, int cinematicScrim, int cinematicArt,
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+-                   boolean settingsKeyClearTask) {
++                   boolean settingsKeyClearTask, String weatherApp, String adbWarningApp) {
++        this.weatherApp = weatherApp;
++        this.adbWarningApp = adbWarningApp;
+         this.handleViewInputs = handleViewInputs;
+         this.tileMenu = tileMenu;
+         this.inputKeycodes = inputKeycodes;
+@@ -486,6 +492,8 @@ final class Config {
+         boolean backOpensClock = res.getBoolean(R.bool.back_opens_clock);
+         boolean glowSnap = res.getBoolean(R.bool.glow_snap);
+         boolean settingsKeyClearTask = res.getBoolean(R.bool.settings_key_clear_task);
++        String weatherApp = res.getString(R.string.weather_app).trim();
++        String adbWarningApp = res.getString(R.string.adb_warning_app).trim();
+         boolean libraryButton = res.getBoolean(R.bool.library_button);
+         boolean showLibraryPill = res.getBoolean(R.bool.show_library_pill);
+         int wifiLabelWidth = res.getInteger(R.integer.wifi_label_width);
+@@ -603,6 +611,8 @@ final class Config {
+             backOpensClock = bool(json, "back_opens_clock", backOpensClock);
+             glowSnap = bool(json, "glow_snap", glowSnap);
+             settingsKeyClearTask = bool(json, "settings_key_clear_task", settingsKeyClearTask);
++            weatherApp = string(json, "weather_app", weatherApp).trim();
++            adbWarningApp = string(json, "adb_warning_app", adbWarningApp).trim();
+             libraryButton = bool(json, "library_button", libraryButton);
+             showLibraryPill = bool(json, "show_library_pill", showLibraryPill);
+             wifiLabelWidth = integer(json, "wifi_label_width", wifiLabelWidth, 0, 300);
+@@ -732,7 +742,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask);
++                settingsKeyClearTask, weatherApp, adbWarningApp);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/GameDay.java b/launcher/app/src/main/java/com/gathin/tvhome/GameDay.java
+index 8a3bf58..c219dd2 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/GameDay.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/GameDay.java
+@@ -57,17 +57,26 @@ final class GameDay {
+      * {@value #META} meta-data. Naming the package is the owner's opt-in.
+      */
+     static GameDay create(Context ctx, String pkg, Handler main, Runnable onChange) {
++        Uri uri = ownProviderUri(ctx, pkg, META, "turns");
++        return uri == null ? null : new GameDay(ctx, uri, main, onChange);
++    }
++
++    /**
++     * content://authority/path for the provider that {@code pkg} names in its {@code meta} meta-data; null when the
++     * key is empty, the package is missing or names none, or the authority is another app's. Also used by
++     * {@link WeatherNow}.
++     */
++    static Uri ownProviderUri(Context ctx, String pkg, String meta, String path) {
+         if (pkg == null || pkg.trim().isEmpty()) return null;
+         try {
+             PackageManager pm = ctx.getPackageManager();
+             ApplicationInfo info = pm.getApplicationInfo(pkg.trim(), PackageManager.GET_META_DATA);
+-            String authority = info.metaData == null ? null : info.metaData.getString(META);
++            String authority = info.metaData == null ? null : info.metaData.getString(meta);
+             if (authority == null || authority.trim().isEmpty()) return null;
+             // The provider must be the named package's own, not another app's that claims the authority.
+             ProviderInfo provider = pm.resolveContentProvider(authority.trim(), 0);
+             if (provider == null || !pkg.trim().equals(provider.packageName)) return null;
+-            Uri uri = new Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT).authority(authority.trim()).appendPath("turns").build();
+-            return new GameDay(ctx, uri, main, onChange);
++            return new Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT).authority(authority.trim()).appendPath(path).build();
+         } catch (PackageManager.NameNotFoundException e) {
+             return null;
+         }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index eccf73f..91430d0 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -16,6 +16,7 @@ import android.content.pm.ApplicationInfo;
+ import android.content.pm.ResolveInfo;
+ import android.content.pm.ChangedPackages;
+ import android.content.res.ColorStateList;
++import android.database.ContentObserver;
+ import android.content.res.Resources;
+ import android.graphics.Bitmap;
+ import android.graphics.Canvas;
+@@ -202,6 +203,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     private TextView raceKicker, raceHeadline, raceSessions;
+     /** game_day: each team's next game from an add-on, rotating in the race panel; null when the key is off. */
+     private GameDay gameDay;
++    /** weather_app: the weather beside the date; null when the key is off. */
++    private WeatherNow weather;
++    /** adb_warning_app: the red button shown while ADB is reachable over the network, and the app it opens. */
++    private TextView btnAdb;
++    private String adbWarningApp = "";
++    /** Watches the ADB switches while Home is on screen; null otherwise. */
++    private ContentObserver adbObserver;
+     private View raceBar;
+     private LinearLayout racePager;
+     private long rotationStart;
+@@ -585,6 +593,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         raceBar = findViewById(R.id.raceBar);
+         racePager = findViewById(R.id.racePager);
+         gameDay = GameDay.create(this, cfg.gameDay, handler, this::updatePanel);
++        weather = WeatherNow.create(this, cfg.weatherApp, handler, this::updateWeather);
++        if (weather != null) makeRoomForWeather();
+         // The rotation runs on the clock that never jumps: setting the TV's time must not stall or stretch a turn.
+         rotationStart = SystemClock.elapsedRealtime();
+         showStats = cfg.showStats;
+@@ -611,6 +621,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         vpnApp = cfg.vpnApp;
+         vpnPill = cfg.vpnPill && !cfg.topMenu;
+         btnVpn = findViewById(R.id.btnVpn);
++        btnAdb = findViewById(R.id.btnAdb);
++        adbWarningApp = cfg.adbWarningApp;
++        // Styled as the red "VPN off" pill: dark glass outlined in red at rest, solid red with a white ring focused.
++        btnAdb.setBackground(VpnBadge.pillBackground(false, density));
++        btnAdb.setCompoundDrawableTintList(new ColorStateList(
++                new int[][]{new int[]{android.R.attr.state_focused}, new int[0]},
++                new int[]{VpnBadge.pillInkColor(false, true), VpnBadge.pillInkColor(false, false)}));
+         moduleCards = cfg.moduleCards;
+         hiddenApps = new HashSet<>(cfg.hiddenApps);
+         libraryExcludedApps = new HashSet<>(cfg.libraryExcludedApps);
+@@ -824,6 +841,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         btnInputs.setOnClickListener(v -> showInputs());
+         btnWifi.setOnClickListener(v -> openNetworkPill());
+         btnVpn.setOnClickListener(v -> openVpnPill());
++        btnAdb.setOnClickListener(v -> openAdbWarningApp());
+         btnWifi.setOnLongClickListener(v -> {
+             open(systemIntent(Settings.ACTION_WIFI_SETTINGS));
+             return true;
+@@ -920,9 +938,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         btnSettings.setOnKeyListener(pillKeys);
+         btnReorder.setOnKeyListener(pillKeys);
+         btnLibraryTop.setOnKeyListener(pillKeys);
++        btnAdb.setOnKeyListener(pillKeys);
+         for (View button : topAppButtons) button.setOnKeyListener(pillKeys);
+         if (advancedEffects) {
+-            List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnVpn, btnReorder, btnLibraryTop, btnSettings));
++            List<View> pills = new ArrayList<>(Arrays.asList(btnAdb, btnInputs, btnWifi, btnVpn, btnReorder, btnLibraryTop, btnSettings));
+             pills.addAll(topAppButtons);
+             for (View button : pills) {
+                 button.setOnFocusChangeListener((view, focused) -> view.animate()
+@@ -1060,6 +1079,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         if (openInputsIfAsked(intent)) return;
+         if (intent == null || !intent.hasCategory(Intent.CATEGORY_HOME)) return;
+         if (gameDay != null && !stopped) gameDay.read();
++        if (weather != null && !stopped) weather.read();
+         grid.scrollToPosition(0);
+         lastFocused = 0;
+         lastFocusedKey = adapter.getItemCount() > 0 ? adapter.keyAt(0) : null;
+@@ -1138,6 +1158,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+         if (showStats) startStats();
+         if (gameDay != null) gameDay.start();
++        if (weather != null) weather.start();
++        startAdbWarning();
+         sky.update();
+         wallpaperPlayer.start();
+         handler.postDelayed(minuteTick, MINUTE_MS);
+@@ -1323,6 +1345,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         startPending = null;   // leaving Home before the network came back: the boot's app stays closed
+         stopStats();
+         if (gameDay != null) gameDay.stop();
++        if (weather != null) weather.stop();
++        stopAdbWarning();
+         handler.removeCallbacks(turnTick);
+         if (lamp != null) lamp.stop();
+         cancelPendingFocusScroll();
+@@ -1391,6 +1415,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         RemoteKeys.release(this);
+         cancelHoldOk();
+         if (gameDay != null) gameDay.shutdown();
++        if (weather != null) weather.shutdown();
+         unregisterReceiver(packageReceiver);
+         if (openOnStartOnWake) unregisterReceiver(wakeReceiver);
+         wallpaperPlayer.close();
+@@ -2513,9 +2538,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             ((LinearLayout.LayoutParams) clockRow.getLayoutParams()).gravity = Gravity.RIGHT;
+         }
+         clockColumn.addView(column, clockColumn.indexOfChild(clockRow) + 1, lp);
+-        // The column now wraps its texts, so they must wrap too: a match_parent TextView does not ask for a new
+-        // layout when its text gets longer, and the column kept the width of the day before ("TUESDAY 27 OCTOB…").
+-        ViewGroup texts = (ViewGroup) column;
++        wrapColumnTexts((ViewGroup) column);
++    }
++
++    /** weather_app: the date column takes only its texts' width, so the weather block gets the rest of the row. */
++    private void makeRoomForWeather() {
++        View column = (View) findViewById(R.id.date).getParent();
++        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) column.getLayoutParams();
++        lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
++        lp.weight = 0;
++        column.setLayoutParams(lp);
++        wrapColumnTexts((ViewGroup) column);
++    }
++
++    /**
++     * A date column that wraps its texts needs them to wrap too: a match_parent TextView does not ask for a new
++     * layout when its text gets longer, and the column kept the width of the day before ("TUESDAY 27 OCTOB…").
++     */
++    private static void wrapColumnTexts(ViewGroup texts) {
+         for (int i = 0; i < texts.getChildCount(); i++) {
+             View text = texts.getChildAt(i);
+             LinearLayout.LayoutParams textLp = (LinearLayout.LayoutParams) text.getLayoutParams();
+@@ -3175,6 +3215,63 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         libraryFromVpnPill = true;
+     }
+ 
++    /** weather_app: the reading beside the date; the block stays gone until there is one. */
++    private void updateWeather() {
++        View block = findViewById(R.id.weatherBlock);
++        WeatherNow.Now now = weather == null ? null : weather.now();
++        if (now == null) {
++            block.setVisibility(View.GONE);
++            return;
++        }
++        ((ImageView) findViewById(R.id.weatherIcon)).setImageResource(WeatherNow.icon(now.code, now.day));
++        ((TextView) findViewById(R.id.weatherTemp)).setText(now.temp);
++        ((TextView) findViewById(R.id.weatherSummary)).setText(now.summary);
++        TextView days = findViewById(R.id.weatherDays);
++        days.setText(now.days);
++        days.setVisibility(now.days.isEmpty() ? View.GONE : View.VISIBLE);
++        block.setVisibility(View.VISIBLE);
++    }
++
++    /** adb_warning_app: watch the two ADB switches while Home is on screen. */
++    private void startAdbWarning() {
++        if (adbWarningApp.isEmpty()) return;
++        if (adbObserver == null) {
++            adbObserver = new ContentObserver(handler) {
++                @Override
++                public void onChange(boolean selfChange) {
++                    updateAdbWarning();
++                }
++            };
++            getContentResolver().registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, adbObserver);
++            getContentResolver().registerContentObserver(Settings.Global.getUriFor("adb_wifi_enabled"), false, adbObserver);
++        }
++        updateAdbWarning();
++    }
++
++    private void stopAdbWarning() {
++        if (adbObserver == null) return;
++        getContentResolver().unregisterContentObserver(adbObserver);
++        adbObserver = null;
++    }
++
++    private void updateAdbWarning() {
++        boolean open = AdbWarning.network(
++                Settings.Global.getInt(getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1,
++                Settings.Global.getInt(getContentResolver(), "adb_wifi_enabled", 0) == 1,
++                AdbWarning.port(AdbWarning.prop("service.adb.tcp.port")));
++        boolean focused = btnAdb.hasFocus();
++        btnAdb.setVisibility(open ? View.VISIBLE : View.GONE);
++        if (!open && focused) firstTopButton().requestFocus();
++    }
++
++    /** The configured app (Remote Access switches ADB off), or Developer options when it is not installed. */
++    private void openAdbWarningApp() {
++        PackageManager pm = getPackageManager();
++        Intent launch = pm.getLeanbackLaunchIntentForPackage(adbWarningApp);
++        if (launch == null) launch = pm.getLaunchIntentForPackage(adbWarningApp);
++        open(launch != null ? launch : systemIntent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
++    }
++
+     /** vpn_pill: the pill outlined in green with a lock while a VPN is up, outlined in red "VPN off" while it is not;
+      *  solid with a white ring only while focused. */
+     private void updateVpnPill(boolean vpn) {
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java b/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
+new file mode 100644
+index 0000000..81790bd
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/WeatherNow.java
+@@ -0,0 +1,151 @@
++package com.gathin.tvhome;
++
++import android.content.Context;
++import android.database.ContentObserver;
++import android.database.Cursor;
++import android.net.Uri;
++import android.os.Handler;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.RejectedExecutionException;
++
++/**
++ * weather_app (config.xml or a theme): the weather now beside the date and under the screensaver clock, from an
++ * add-on that publishes it (a {@value #META} meta-data naming its provider; one row at content://authority/now).
++ * The launcher stays offline: the add-on fetches when read. Same opt-in and checks as {@link GameDay}.
++ */
++final class WeatherNow {
++    static final String META = "com.gathin.tvhome.weather";
++    private static final String[] COLUMNS = {"temp", "summary", "days", "code", "is_day"};
++
++    /** One reading: ready-to-show texts, and the WMO code and day or night for the icon. */
++    static final class Now {
++        final String temp;
++        final String summary;
++        final String days;
++        final int code;
++        final boolean day;
++
++        Now(String temp, String summary, String days, int code, boolean day) {
++            this.temp = temp;
++            this.summary = summary;
++            this.days = days;
++            this.code = code;
++            this.day = day;
++        }
++    }
++
++    private final Context ctx;
++    private final Uri uri;
++    private final Handler main;
++    private final Runnable onChange;
++    private final ExecutorService io = Executors.newSingleThreadExecutor();
++    private final ContentObserver observer;
++    /** Asked again this often while on screen (the screensaver runs for hours); the add-on fetches only when stale. */
++    private static final long REREAD_MS = 30 * 60_000L;
++    private final Runnable reread = this::rereadTick;
++    private boolean watching;
++    private Now now;
++
++    private WeatherNow(Context ctx, Uri uri, Handler main, Runnable onChange) {
++        this.ctx = ctx;
++        this.uri = uri;
++        this.main = main;
++        this.onChange = onChange;
++        observer = new ContentObserver(main) {
++            @Override
++            public void onChange(boolean selfChange) {
++                read();
++            }
++        };
++    }
++
++    /** Null when the key is empty or the package publishes no weather of its own. */
++    static WeatherNow create(Context ctx, String pkg, Handler main, Runnable onChange) {
++        Uri uri = GameDay.ownProviderUri(ctx, pkg, META, "now");
++        return uri == null ? null : new WeatherNow(ctx, uri, main, onChange);
++    }
++
++    /** On screen: read now (the add-on fetches if its copy is old) and watch for the fresh one. */
++    void start() {
++        if (!watching) {
++            try {
++                ctx.getContentResolver().registerContentObserver(uri, false, observer);
++                watching = true;
++            } catch (SecurityException e) {
++                // The add-on's provider went away; the line keeps what it had.
++            }
++        }
++        read();
++        main.removeCallbacks(reread);
++        main.postDelayed(reread, REREAD_MS);
++    }
++
++    private void rereadTick() {
++        read();
++        main.postDelayed(reread, REREAD_MS);
++    }
++
++    /** Off screen: nothing is read, so the add-on fetches nothing. */
++    void stop() {
++        main.removeCallbacks(reread);
++        if (watching) ctx.getContentResolver().unregisterContentObserver(observer);
++        watching = false;
++    }
++
++    void shutdown() {
++        stop();
++        io.shutdownNow();
++    }
++
++    /** One query off the main thread (the provider lives in the add-on's process), then onChange on the main thread. */
++    void read() {
++        try {
++            io.execute(() -> {
++                Object[] row = null;
++                try (Cursor c = ctx.getContentResolver().query(uri, COLUMNS, null, null, null)) {
++                    if (c != null && c.moveToFirst()) {
++                        row = new Object[] {c.getString(0), c.getString(1), c.getString(2), c.getInt(3), c.getInt(4)};
++                    }
++                } catch (RuntimeException gone) {
++                    // Uninstalled, crashed or not allowed to start: keep what is on screen.
++                    return;
++                }
++                Now parsed = fromRow(row);
++                main.post(() -> {
++                    now = parsed;
++                    onChange.run();
++                });
++            });
++        } catch (RejectedExecutionException shutDown) {
++            // Being destroyed.
++        }
++    }
++
++    Now now() {
++        return now;
++    }
++
++    /** The add-on's row, or null when there is none or it has no temperature (no city chosen, first fetch running). */
++    static Now fromRow(Object[] r) {
++        if (r == null || !(r[0] instanceof String) || ((String) r[0]).trim().isEmpty()) return null;
++        int code = r[3] instanceof Number ? ((Number) r[3]).intValue() : 3;
++        boolean day = !(r[4] instanceof Number) || ((Number) r[4]).intValue() != 0;
++        return new Now(((String) r[0]).trim(), text(r[1]), text(r[2]), code, day);
++    }
++
++    private static String text(Object o) {
++        return o instanceof String ? ((String) o).trim() : "";
++    }
++
++    /** The WMO weather code as one of eight line icons; clear skies show the sun by day and the moon by night. */
++    static int icon(int code, boolean day) {
++        if (code == 0 || code == 1) return day ? R.drawable.ic_weather_sun : R.drawable.ic_weather_moon;
++        if (code == 2) return R.drawable.ic_weather_partly;
++        if (code == 45 || code == 48) return R.drawable.ic_weather_fog;
++        if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return R.drawable.ic_weather_rain;
++        if ((code >= 71 && code <= 77) || code == 85 || code == 86) return R.drawable.ic_weather_snow;
++        if (code >= 95) return R.drawable.ic_weather_storm;
++        return R.drawable.ic_weather_cloud;
++    }
++}
+diff --git a/launcher/app/src/main/res/drawable/ic_terminal.xml b/launcher/app/src/main/res/drawable/ic_terminal.xml
+new file mode 100644
+index 0000000..289bb0d
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_terminal.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_terminal -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M5,8l4,4l-4,4" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M12,16h7" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_cloud.xml b/launcher/app/src/main/res/drawable/ic_weather_cloud.xml
+new file mode 100644
+index 0000000..ac9a3c0
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_cloud.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_cloud -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M7,18h10.5a4,4 0 0,0 0.4,-7.98A6,6 0 0,0 6.3,11.3A3.4,3.4 0 0,0 7,18z" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_fog.xml b/launcher/app/src/main/res/drawable/ic_weather_fog.xml
+new file mode 100644
+index 0000000..4599d77
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_fog.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_fog -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M7,13h10.5a3.5,3.5 0 0,0 0.3,-6.98A5,5 0 0,0 6.4,6.9A3,3 0 0,0 7,13z" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M4,16.5h16M6,20h12" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_moon.xml b/launcher/app/src/main/res/drawable/ic_weather_moon.xml
+new file mode 100644
+index 0000000..6e1baa2
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_moon.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_moon -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M20,14.5A8,8 0 1,1 9.5,4A6.5,6.5 0 0,0 20,14.5z" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_partly.xml b/launcher/app/src/main/res/drawable/ic_weather_partly.xml
+new file mode 100644
+index 0000000..b3dbbbd
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_partly.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_partly -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M8.5,3.5v1.2M3.3,8.7h1.2M4.8,5l0.8,0.8M12.2,5l-0.8,0.8" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M5.6,11.4A3.6,3.6 0 0,1 11.7,7.2" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M9,20h8.5a3.5,3.5 0 0,0 0.3,-6.98A5,5 0 0,0 8.4,13.9A3,3 0 0,0 9,20z" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_rain.xml b/launcher/app/src/main/res/drawable/ic_weather_rain.xml
+new file mode 100644
+index 0000000..409927f
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_rain.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_rain -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M7,15h10.5a4,4 0 0,0 0.4,-7.98A6,6 0 0,0 6.3,8.3A3.4,3.4 0 0,0 7,15z" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M9,18l-1,2.5M13,18l-1,2.5M17,18l-1,2.5" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_snow.xml b/launcher/app/src/main/res/drawable/ic_weather_snow.xml
+new file mode 100644
+index 0000000..d570800
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_snow.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_snow -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M7,15h10.5a4,4 0 0,0 0.4,-7.98A6,6 0 0,0 6.3,8.3A3.4,3.4 0 0,0 7,15z" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M8,18.5h0.01M12,18.5h0.01M16,18.5h0.01M10,21.5h0.01M14,21.5h0.01" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_storm.xml b/launcher/app/src/main/res/drawable/ic_weather_storm.xml
+new file mode 100644
+index 0000000..2f70194
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_storm.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_storm -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M7,15h10.5a4,4 0 0,0 0.4,-7.98A6,6 0 0,0 6.3,8.3A3.4,3.4 0 0,0 7,15z" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M12.5,15.5l-2,3.5h3l-2,3.5" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_weather_sun.xml b/launcher/app/src/main/res/drawable/ic_weather_sun.xml
+new file mode 100644
+index 0000000..ff931f1
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_weather_sun.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- ic_weather_sun -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="28dp" android:height="28dp"
++    android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M8,12a4,4 0 1,0 8,0a4,4 0 1,0 -8,0" />
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:pathData="M12,2.5v2M12,19.5v2M2.5,12h2M19.5,12h2M5.3,5.3l1.4,1.4M17.3,17.3l1.4,1.4M5.3,18.7l1.4,-1.4M17.3,6.7l1.4,-1.4" />
++</vector>
+diff --git a/launcher/app/src/main/res/layout/activity_main.xml b/launcher/app/src/main/res/layout/activity_main.xml
+index 4dd006b..f33a60d 100644
+--- a/launcher/app/src/main/res/layout/activity_main.xml
++++ b/launcher/app/src/main/res/layout/activity_main.xml
+@@ -299,6 +299,75 @@
+                             android:textAllCaps="true"
+                             android:visibility="gone" />
+                     </LinearLayout>
++
++                    <!-- weather_app: the weather now after the date, with the same line before it. Gone without the
++                         key or a reading; its two lines give way (ellipsis) to the top buttons. -->
++                    <LinearLayout
++                        android:id="@+id/weatherBlock"
++                        android:layout_width="0dp"
++                        android:layout_weight="1"
++                        android:layout_height="wrap_content"
++                        android:layout_gravity="bottom"
++                        android:layout_marginBottom="6dp"
++                        android:orientation="horizontal"
++                        android:gravity="center_vertical"
++                        android:visibility="gone">
++                        <View
++                            android:layout_width="1dp"
++                            android:layout_height="26dp"
++                            android:layout_marginStart="16dp"
++                            android:layout_marginEnd="16dp"
++                            android:background="#33FFFFFF" />
++                        <ImageView
++                            android:id="@+id/weatherIcon"
++                            android:layout_width="28dp"
++                            android:layout_height="28dp"
++                            android:importantForAccessibility="no" />
++                        <TextView
++                            android:id="@+id/weatherTemp"
++                            android:layout_width="wrap_content"
++                            android:layout_height="wrap_content"
++                            android:layout_marginStart="10dp"
++                            android:singleLine="true"
++                            android:textColor="#FFFFFFFF"
++                            android:textSize="34sp"
++                            android:fontFamily="@string/font_light"
++                            android:letterSpacing="-0.02"
++                            android:fontFeatureSettings="tnum"
++                            android:includeFontPadding="false" />
++                        <LinearLayout
++                            android:layout_width="0dp"
++                            android:layout_weight="1"
++                            android:layout_height="wrap_content"
++                            android:layout_marginStart="12dp"
++                            android:orientation="vertical">
++                            <TextView
++                                android:id="@+id/weatherSummary"
++                                android:gravity="left"
++                                android:layout_width="match_parent"
++                                android:layout_height="wrap_content"
++                                android:singleLine="true"
++                                android:ellipsize="end"
++                                android:textColor="#A6FFFFFF"
++                                android:textSize="13sp"
++                                android:fontFamily="@string/font_regular"
++                                android:letterSpacing="0.1"
++                                android:textAllCaps="true" />
++                            <TextView
++                                android:id="@+id/weatherDays"
++                                android:gravity="left"
++                                android:layout_width="match_parent"
++                                android:layout_height="wrap_content"
++                                android:layout_marginTop="5dp"
++                                android:singleLine="true"
++                                android:ellipsize="end"
++                                android:textColor="#80FFFFFF"
++                                android:textSize="13sp"
++                                android:fontFamily="@string/font_regular"
++                                android:letterSpacing="0.1"
++                                android:textAllCaps="true" />
++                        </LinearLayout>
++                    </LinearLayout>
+                 </LinearLayout>
+ 
+             </LinearLayout>
+@@ -333,6 +402,15 @@
+                 android:clipToPadding="false"
+                 android:orientation="horizontal">
+ 
++                <!-- adb_warning_app: shown only while ADB is reachable over the network; opens that app. -->
++                <TextView
++                    android:id="@+id/btnAdb"
++                    style="@style/TopButtonIcon"
++                    android:visibility="gone"
++                    android:contentDescription="@string/adb_open"
++                    android:drawableStart="@drawable/ic_terminal"
++                    android:nextFocusDown="@+id/grid" />
++
+                 <TextView
+                     android:id="@+id/btnInputs"
+                     style="@style/TopButton"
+diff --git a/launcher/app/src/main/res/layout/dream_clock.xml b/launcher/app/src/main/res/layout/dream_clock.xml
+index b059bfa..f2952f3 100644
+--- a/launcher/app/src/main/res/layout/dream_clock.xml
++++ b/launcher/app/src/main/res/layout/dream_clock.xml
+@@ -61,5 +61,21 @@
+             android:fontFamily="@string/font_regular"
+             android:letterSpacing="0.14"
+             android:textAllCaps="true" />
++
++        <!-- weather_app: "15° · Nublado · Sensación 14°" under the date, with its icon; gone without a reading. -->
++        <TextView
++            android:id="@+id/dreamWeather"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginStart="6dp"
++            android:layout_marginTop="14dp"
++            android:gravity="center_vertical"
++            android:drawablePadding="12dp"
++            android:drawableTint="#B3FFFFFF"
++            android:textColor="#B3FFFFFF"
++            android:textSize="20sp"
++            android:fontFamily="@string/font_light"
++            android:letterSpacing="0.04"
++            android:visibility="gone" />
+     </LinearLayout>
+ </FrameLayout>
+diff --git a/launcher/app/src/main/res/values-es/strings.xml b/launcher/app/src/main/res/values-es/strings.xml
+index 1d5f8b5..abe30d9 100644
+--- a/launcher/app/src/main/res/values-es/strings.xml
++++ b/launcher/app/src/main/res/values-es/strings.xml
+@@ -87,6 +87,7 @@
+     <string name="greeting_with_name">%1$s, %2$s</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN apagada</string>
++    <string name="adb_open">ADB abierto</string>
+     <string name="home_settings">Elegir inicio predeterminado</string>
+     <string name="home_settings_help">Elige tu inicio original para dejar de usar CleanYourTV como inicio, o CleanYourTV para volver a él. El lanzador original tiene que estar activado y el televisor debe ofrecer un selector de inicio; si estaba desactivado, usa antes el script de restauración.</string>
+     <string name="rows_below_dock_label">Filas debajo del dock</string>
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index a32a106..051931d 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -488,6 +488,16 @@
+          online. A theme can set "game_day". -->
+     <string name="game_day" translatable="false"></string>
+ 
++    <!-- The package of an add-on that publishes the weather now (the Weather add-on: io.github.sumyabazar1.weather),
++         shown beside the date on Home and under the clock screensaver. Empty = off. Read only while on screen; the
++         add-on fetches when read, never more than every 30 minutes. A theme can set "weather_app". -->
++    <string name="weather_app" translatable="false"></string>
++
++    <!-- A package (e.g. the Remote Access add-on, io.github.maxhayim.remoteaccess) that a red button in the top bar
++         opens while ADB is reachable over the network, so an open ADB is noticed. Empty = no button. A theme can
++         set "adb_warning_app". -->
++    <string name="adb_warning_app" translatable="false"></string>
++
+     <!-- Time-of-day backdrop behind everything: a dark gradient that follows the clock, with a warm
+          horizon glow around sunrise and sunset. 0 keeps the plain background (the default); 1 to 100
+          sets its opacity. Around 60 reads clearly without hiding a wallpaper. Can also be set with
+diff --git a/launcher/app/src/main/res/values/strings.xml b/launcher/app/src/main/res/values/strings.xml
+index 2b2b53e..6d81d48 100644
+--- a/launcher/app/src/main/res/values/strings.xml
++++ b/launcher/app/src/main/res/values/strings.xml
+@@ -46,6 +46,7 @@
+     <string name="dream_name">Clock</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN off</string>
++    <string name="adb_open">ADB open</string>
+     <string name="home_settings">Choose default home</string>
+     <string name="home_settings_help">Select your original home to stop using CleanYourTV as Home, or CleanYourTV to switch back. The original launcher must be enabled and your TV must provide a home picker; use the restore script first if it was disabled.</string>
+     <string name="launcher_settings">Launcher settings</string>
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/AdbWarningTest.java b/launcher/app/src/test/java/com/gathin/tvhome/AdbWarningTest.java
+new file mode 100644
+index 0000000..52cf2f6
+--- /dev/null
++++ b/launcher/app/src/test/java/com/gathin/tvhome/AdbWarningTest.java
+@@ -0,0 +1,38 @@
++package com.gathin.tvhome;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++
++public class AdbWarningTest {
++    @Test
++    public void debuggingOffHidesTheWarningEvenWithALeftoverPort() {
++        assertFalse(AdbWarning.network(false, false, 5555));
++        assertFalse(AdbWarning.network(false, false, -1));
++    }
++
++    @Test
++    public void usbOnlyIsNotReachableFromTheNetwork() {
++        assertFalse(AdbWarning.network(true, false, -1));
++    }
++
++    @Test
++    public void aTcpPortOrWirelessDebuggingIsNetworkAdb() {
++        assertTrue(AdbWarning.network(true, false, 5555));
++        assertTrue(AdbWarning.network(false, true, -1));
++    }
++
++    @Test
++    public void portReadsOnlyARealPort() {
++        assertEquals(5555, AdbWarning.port("5555"));
++        assertEquals(5555, AdbWarning.port(" 5555 "));
++        assertEquals(-1, AdbWarning.port(null));
++        assertEquals(-1, AdbWarning.port(""));
++        assertEquals(-1, AdbWarning.port("0"));
++        assertEquals(-1, AdbWarning.port("-1"));
++        assertEquals(-1, AdbWarning.port("70000"));
++        assertEquals(-1, AdbWarning.port("adb"));
++    }
++}
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java b/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
+new file mode 100644
+index 0000000..858fe89
+--- /dev/null
++++ b/launcher/app/src/test/java/com/gathin/tvhome/WeatherNowTest.java
+@@ -0,0 +1,53 @@
++package com.gathin.tvhome;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++
++public class WeatherNowTest {
++    @Test
++    public void aRowWithATemperatureIsTheWeather() {
++        WeatherNow.Now now = WeatherNow.fromRow(new Object[] {"15°", "Nublado · Sensación 14°", "mié 17°/15° · jue 16°/9°", 3, 0});
++        assertEquals("15°", now.temp);
++        assertEquals("Nublado · Sensación 14°", now.summary);
++        assertEquals("mié 17°/15° · jue 16°/9°", now.days);
++        assertEquals(3, now.code);
++        assertFalse(now.day);
++    }
++
++    @Test
++    public void noRowOrNoTemperatureIsNoWeather() {
++        assertNull(WeatherNow.fromRow(null));
++        assertNull(WeatherNow.fromRow(new Object[] {"", "Nublado", "", 3, 1}));
++        assertNull(WeatherNow.fromRow(new Object[] {null, "Nublado", "", 3, 1}));
++    }
++
++    @Test
++    public void missingTextsAndNumbersFallBack() {
++        WeatherNow.Now now = WeatherNow.fromRow(new Object[] {" 9° ", null, null, null, null});
++        assertEquals("9°", now.temp);
++        assertEquals("", now.summary);
++        assertEquals("", now.days);
++        assertEquals(3, now.code);
++        assertTrue(now.day);
++    }
++
++    @Test
++    public void iconsFollowTheWmoCode() {
++        assertEquals(R.drawable.ic_weather_sun, WeatherNow.icon(0, true));
++        assertEquals(R.drawable.ic_weather_moon, WeatherNow.icon(1, false));
++        assertEquals(R.drawable.ic_weather_partly, WeatherNow.icon(2, true));
++        assertEquals(R.drawable.ic_weather_cloud, WeatherNow.icon(3, false));
++        assertEquals(R.drawable.ic_weather_fog, WeatherNow.icon(45, true));
++        assertEquals(R.drawable.ic_weather_rain, WeatherNow.icon(51, true));
++        assertEquals(R.drawable.ic_weather_rain, WeatherNow.icon(66, true));
++        assertEquals(R.drawable.ic_weather_rain, WeatherNow.icon(81, true));
++        assertEquals(R.drawable.ic_weather_snow, WeatherNow.icon(73, true));
++        assertEquals(R.drawable.ic_weather_snow, WeatherNow.icon(86, true));
++        assertEquals(R.drawable.ic_weather_storm, WeatherNow.icon(95, false));
++        assertEquals(R.drawable.ic_weather_cloud, WeatherNow.icon(42, true));
++    }
++}
+-- 
+2.54.0.windows.1
+

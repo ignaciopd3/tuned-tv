@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Guides / Guías
+    url: https://github.com/ignaciopd3/tuned-tv/tree/main/docs/guides
+    about: How to turn on developer mode or debugging on each system · Cómo activar el modo desarrollador o la depuración en cada sistema

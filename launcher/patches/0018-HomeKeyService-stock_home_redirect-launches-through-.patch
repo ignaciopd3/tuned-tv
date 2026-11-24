@@ -1,0 +1,227 @@
+From e560626918e19cc192ba453d815eb22ec1de722b Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 20:03:11 +0100
+Subject: [PATCH 18/23] HomeKeyService: stock_home_redirect launches through an
+ exact alarm under a cover
+
+Fire OS holds back app starts for 5 s after Home (APP_SWITCH_DELAY_TIME), so the
+redirect left Amazon's home, ads and all, on screen for 5 s. An alarm's PendingIntent
+is sent by system_server, which is exempt, and with alarm_manager_constants
+min_futurity=0 it fires at once; an accessibility overlay hides the stock home until
+MainActivity has focus (1.5 s at most). Technique from dumbtv's Guard (MIT).
+---
+ .../com/gathin/tvhome/HomeKeyService.java     | 138 +++++++++++++++++-
+ .../java/com/gathin/tvhome/MainActivity.java  |   1 +
+ 2 files changed, 135 insertions(+), 4 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+index c4acc83..74e910e 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+@@ -2,6 +2,9 @@ package com.gathin.tvhome;
+ 
+ import android.accessibilityservice.AccessibilityService;
+ import android.accessibilityservice.AccessibilityServiceInfo;
++import android.app.ActivityOptions;
++import android.app.AlarmManager;
++import android.app.PendingIntent;
+ import android.content.ActivityNotFoundException;
+ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
+@@ -17,9 +20,12 @@ import android.os.SystemClock;
+ import android.os.UserManager;
+ import android.content.pm.PackageManager;
+ import android.content.pm.ResolveInfo;
++import android.graphics.PixelFormat;
+ import android.provider.Settings;
+ import android.view.KeyEvent;
++import android.view.View;
+ import android.view.ViewConfiguration;
++import android.view.WindowManager;
+ import android.view.accessibility.AccessibilityEvent;
+ import android.widget.Toast;
+ 
+@@ -72,6 +78,13 @@ public class HomeKeyService extends AccessibilityService {
+     private final Set<String> stockHome = new HashSet<>();
+     /** stock_home_redirect, the stock launcher's package. */
+     private String stockHomePackage = "";
++    /** stock_home_redirect: a plain overlay that hides the stock home (ads and all) until this launcher has drawn. */
++    private View cover;
++    private final Runnable uncover = this::uncover;
++    /** The last window was the stock home: waking from standby shows it again with no new window event. */
++    private boolean onStockHome;
++    private BroadcastReceiver stockScreenOn;
++    static final long COVER_MAX_MS = 1500;
+     /** power_on_home: the Live TV package to send back to Home, empty when off; armed until this uptime or a key. */
+     private String powerOnLiveTv = "";
+     private long powerOnUntil;
+@@ -142,6 +155,7 @@ public class HomeKeyService extends AccessibilityService {
+         RemoteKeys.release(this);
+         stopWaitingForUnlock();
+         if (screenOnReceiver != null) unregisterReceiver(screenOnReceiver);
++        disarmStockHome();
+         if (standbyExit != null) {
+             try {
+                 unregisterReceiver(standbyExit);
+@@ -209,6 +223,8 @@ public class HomeKeyService extends AccessibilityService {
+                 stockHome.add(ri.activityInfo.name);
+             }
+         }
++        if (!stockHome.isEmpty()) armStockHome(config.backgroundColor);
++        else disarmStockHome();
+         // power_on_home, off by default. Not with boot_to_live_tv, or with Live TV picked as the Open on start app:
+         // those open Live TV on purpose at boot.
+         String openOnStart = config.openOnStartChoice
+@@ -338,8 +354,118 @@ public class HomeKeyService extends AccessibilityService {
+             return;
+         }
+         // stock_home_redirect: the firmware turned the stock launcher back on and its home screen came up.
+-        CharSequence cls = event.getClassName();
+-        if (!stockHome.isEmpty() && cls != null && stockHome.contains(cls.toString())) openHome();
++        CharSequence pkg = event.getPackageName(), cls = event.getClassName();
++        if (!stockHome.isEmpty() && pkg != null && cls != null && !passingWindow(pkg, cls)) {
++            onStockHome = stockHome.contains(cls.toString());
++            if (onStockHome) redirectStockHome();
++            else if (!getPackageName().contentEquals(pkg)) cancelStockRedirect();
++        }
++    }
++
++    /** System UI, a system dialog or this app's own non-activity window (the cover): the app in front stays. */
++    private boolean passingWindow(CharSequence pkg, CharSequence cls) {
++        return "com.android.systemui".contentEquals(pkg) || "android".contentEquals(pkg)
++                || (getPackageName().contentEquals(pkg) && cls.toString().startsWith("android."));
++    }
++
++    /** stock_home_redirect. Fire OS: Android holds back app starts for 5 s after Home (APP_SWITCH_DELAY_TIME), so a
++     *  plain startActivity left the stock home, ads and all, on screen for those 5 s (measured on a Fire TV Stick 4K
++     *  Max, Fire OS 7.7.1.3). An exact alarm's PendingIntent is sent by system_server, which may switch apps at once,
++     *  and with global alarm_manager_constants min_futurity=0 it fires straight away; meanwhile the cover hides the
++     *  stock home. A wakeup alarm, because Fire OS brings its home up with the screen already off on the way to
++     *  standby. Technique from dumbtv's Guard (github.com/humblemuzzu/dumbtv, MIT).
++     *  shortcut: Android 11+ also wants a visible window of ours before that start (dumbtv fires it from the cover's
++     *  first draw); Fire OS 7 is Android 9, add it for a Fire OS 8 device. */
++    private void redirectStockHome() {
++        showCover();
++        AlarmManager alarms = getSystemService(AlarmManager.class);
++        if (alarms == null) {
++            openHome();
++            return;
++        }
++        alarms.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime(), homePending());
++    }
++
++    /** Another app came up: drop a launch still queued (an update can reset min_futurity) so it can't pull it back. */
++    private void cancelStockRedirect() {
++        AlarmManager alarms = getSystemService(AlarmManager.class);
++        if (alarms != null) alarms.cancel(homePending());
++        uncover();
++    }
++
++    private PendingIntent homePending() {
++        return PendingIntent.getActivity(this, 0, homeIntent(),
++                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE,
++                ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle());
++    }
++
++    /** The cover (added hidden, shown only on a redirect) and the screen-on check, once per binding. */
++    private void armStockHome(int background) {
++        if (cover == null) {
++            View view = new View(this);
++            view.setVisibility(View.GONE);
++            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
++                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
++                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
++                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
++                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
++                    PixelFormat.OPAQUE);
++            lp.windowAnimations = 0;
++            try {
++                getSystemService(WindowManager.class).addView(view, lp);
++                cover = view;
++            } catch (RuntimeException noOverlay) {
++                // the redirect still works; the stock home just shows for an instant
++            }
++        }
++        if (cover != null) cover.setBackgroundColor(background | 0xFF000000);
++        if (stockScreenOn == null) {
++            stockScreenOn = new BroadcastReceiver() {
++                @Override
++                public void onReceive(Context context, Intent intent) {
++                    if (onStockHome) redirectStockHome();
++                }
++            };
++            registerReceiver(stockScreenOn, new IntentFilter(Intent.ACTION_SCREEN_ON));
++        }
++    }
++
++    private void disarmStockHome() {
++        handler.removeCallbacks(uncover);
++        if (cover != null) {
++            try {
++                getSystemService(WindowManager.class).removeView(cover);
++            } catch (RuntimeException ignored) {
++            }
++            cover = null;
++        }
++        if (stockScreenOn != null) {
++            try {
++                unregisterReceiver(stockScreenOn);
++            } catch (RuntimeException ignored) {
++            }
++            stockScreenOn = null;
++        }
++        onStockHome = false;
++    }
++
++    /** Shown at most COVER_MAX_MS, so a launch that never comes can't leave the screen covered. */
++    private void showCover() {
++        if (cover == null) return;
++        cover.setVisibility(View.VISIBLE);
++        handler.removeCallbacks(uncover);
++        handler.postDelayed(uncover, COVER_MAX_MS);
++    }
++
++    private void uncover() {
++        handler.removeCallbacks(uncover);
++        if (cover != null) cover.setVisibility(View.GONE);
++    }
++
++    /** MainActivity has the screen: the cover over the stock home can go. */
++    static void homeShown() {
++        HomeKeyService service = running;
++        if (service != null) service.uncover();
+     }
+ 
+     /** How long power_on_home stays armed after the screen turns on without a reboot. */
+@@ -433,10 +559,14 @@ public class HomeKeyService extends AccessibilityService {
+     }
+ 
+     private void openHome() {
++        startActivity(homeIntent());
++    }
++
++    private Intent homeIntent() {
+         Intent open = stockHomeStays() ? new Intent(this, MainActivity.class)
+                 : new Intent(Intent.ACTION_MAIN).setPackage(getPackageName());
+-        startActivity(open.addCategory(Intent.CATEGORY_HOME)
+-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
++        return open.addCategory(Intent.CATEGORY_HOME)
++                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+     }
+ 
+     /** stock_home_redirect while Android's Home is still the stock launcher (launcherx on Google TV outranks this
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index 5ad9856..fb87775 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -1406,6 +1406,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     public void onWindowFocusChanged(boolean hasFocus) {
+         super.onWindowFocusChanged(hasFocus);
+         if (hasFocus) {
++            HomeKeyService.homeShown();   // stock_home_redirect: lift the cover over the stock home
+             startPendingSettingsReorder();
+             if (libraryFocusPending && appLibrary == null) focusLibrary();
+             showCardPrompt();
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,66 @@
+From da1697b25381aa314dfd0ab0960e1198a9365652 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 00:32:37 +0100
+Subject: [PATCH 21/23] casa_row: Down goes back to the dock tile Up came from,
+ as on the top bar
+
+The row's buttons had no key rule, so Down from the light or the heater let the
+focus finder pick the tile under the capsule (the last one in the dock) instead
+of the app the owner had come up from. Left and Right now stay in the row at
+its ends, like the top bar.
+---
+ .../main/java/com/gathin/tvhome/CasaRow.java   | 18 ++++++++++++++++++
+ .../java/com/gathin/tvhome/MainActivity.java   |  1 +
+ 2 files changed, 19 insertions(+)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+index 6ddd61e..092038d 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+@@ -13,6 +13,7 @@ import android.os.Handler;
+ import android.os.IBinder;
+ import android.os.Looper;
+ import android.view.Gravity;
++import android.view.KeyEvent;
+ import android.view.View;
+ import android.widget.ImageView;
+ import android.widget.LinearLayout;
+@@ -195,6 +196,23 @@ final class CasaRow {
+         return g;
+     }
+ 
++    /** Down goes back to the dock tile Up came from, as on the top bar (pillKeys in MainActivity): the focus finder
++     *  picked the tile under the capsule instead, the last one in the dock. Left and Right stay in the row at its ends,
++     *  where the focus finder would otherwise jump to a tile below. */
++    void keys(Runnable backToDock) {
++        View.OnKeyListener keys = (v, keyCode, event) -> {
++            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
++            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
++                backToDock.run();
++                return true;
++            }
++            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return v == light;
++            return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v == heater;
++        };
++        light.setOnKeyListener(keys);
++        heater.setOnKeyListener(keys);
++    }
++
+     void start() {
+         if (!watching) {
+             activity.getContentResolver().registerContentObserver(now, false, observer);
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index fb87775..8552480 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -951,6 +951,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         btnReorder.setOnKeyListener(pillKeys);
+         btnLibraryTop.setOnKeyListener(pillKeys);
+         for (View button : topAppButtons) button.setOnKeyListener(pillKeys);
++        if (casaRow != null) casaRow.keys(() -> focusTile(singleRow ? lastFocused : lastFocused % COLUMNS));
+         if (advancedEffects) {
+             List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnVpn, btnReorder, btnLibraryTop, btnSettings));
+             pills.addAll(topAppButtons);
+-- 
+2.54.0.windows.1
+

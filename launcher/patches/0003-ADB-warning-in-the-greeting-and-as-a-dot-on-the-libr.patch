@@ -1,0 +1,369 @@
+From a12e27534463a4c665cd7ae3ae7c46c7435b7ccd Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 07:48:47 +0100
+Subject: [PATCH 03/23] ADB warning in the greeting and as a dot on the library
+ button; weather lines never cut
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A separate red button took the header's width and cut the weather. adb_warning
+(boolean) now turns the greeting red and dots the library button. A weather
+line that does not fit keeps its first ' · ' part instead of an ellipsis.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/AdbWarning.java    |  7 +-
+ .../main/java/com/gathin/tvhome/Config.java   | 14 +--
+ .../java/com/gathin/tvhome/MainActivity.java  | 87 ++++++++++++-------
+ .../app/src/main/res/drawable/ic_terminal.xml | 10 ---
+ .../app/src/main/res/layout/activity_main.xml | 13 +--
+ .../app/src/main/res/values-es/strings.xml    |  2 +-
+ launcher/app/src/main/res/values/config.xml   |  8 +-
+ launcher/app/src/main/res/values/strings.xml  |  2 +-
+ 8 files changed, 76 insertions(+), 67 deletions(-)
+ delete mode 100644 launcher/app/src/main/res/drawable/ic_terminal.xml
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java b/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
+index b5c0d8c..2920982 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/AdbWarning.java
+@@ -1,10 +1,9 @@
+ package com.gathin.tvhome;
+ 
+ /**
+- * adb_warning_app (config.xml or a theme): a red button in the top bar while ADB can be reached over the network,
+- * opening the named app (such as Remote Access) to switch it off. Same rule as that add-on: wireless debugging,
+- * or the developer switch on with a TCP port (adb tcpip). USB only, or a port left over with the switch off, is
+- * not network ADB.
++ * adb_warning (config.xml or a theme): a red greeting and a red dot on the library button while ADB can be reached
++ * over the network. Same rule as the Remote Access add-on: wireless debugging, or the developer switch on with a
++ * TCP port (adb tcpip). USB only, or a port left over with the switch off, is not network ADB.
+  */
+ final class AdbWarning {
+     private AdbWarning() { }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 0c6b167..06600dc 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -142,8 +142,8 @@ final class Config {
+     final boolean settingsKeyClearTask;
+     /** weather_app: the add-on whose weather shows beside the date and in the clock screensaver; empty = off. */
+     final String weatherApp;
+-    /** adb_warning_app: the app the red ADB button opens; empty = no button. */
+-    final String adbWarningApp;
++    /** adb_warning: while ADB is reachable over the network, a red greeting and a red dot on the library button. */
++    final boolean adbWarning;
+     /** App library as a round button in the top bar (config.xml library_button); needs app_library. */
+     final boolean libraryButton;
+     /** The App library pill after the last Home row; false hides it while libraryButton is on (show_library_pill). */
+@@ -303,9 +303,9 @@ final class Config {
+                    boolean handleViewInputs, boolean tileMenu, boolean dockEvenPadding, boolean dockBand, boolean cinematicDots, boolean cinematicWhiteFocus, boolean wifiStatusColor, int cinematicScrim, int cinematicArt,
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+-                   boolean settingsKeyClearTask, String weatherApp, String adbWarningApp) {
++                   boolean settingsKeyClearTask, String weatherApp, boolean adbWarning) {
+         this.weatherApp = weatherApp;
+-        this.adbWarningApp = adbWarningApp;
++        this.adbWarning = adbWarning;
+         this.handleViewInputs = handleViewInputs;
+         this.tileMenu = tileMenu;
+         this.inputKeycodes = inputKeycodes;
+@@ -493,7 +493,7 @@ final class Config {
+         boolean glowSnap = res.getBoolean(R.bool.glow_snap);
+         boolean settingsKeyClearTask = res.getBoolean(R.bool.settings_key_clear_task);
+         String weatherApp = res.getString(R.string.weather_app).trim();
+-        String adbWarningApp = res.getString(R.string.adb_warning_app).trim();
++        boolean adbWarning = res.getBoolean(R.bool.adb_warning);
+         boolean libraryButton = res.getBoolean(R.bool.library_button);
+         boolean showLibraryPill = res.getBoolean(R.bool.show_library_pill);
+         int wifiLabelWidth = res.getInteger(R.integer.wifi_label_width);
+@@ -612,7 +612,7 @@ final class Config {
+             glowSnap = bool(json, "glow_snap", glowSnap);
+             settingsKeyClearTask = bool(json, "settings_key_clear_task", settingsKeyClearTask);
+             weatherApp = string(json, "weather_app", weatherApp).trim();
+-            adbWarningApp = string(json, "adb_warning_app", adbWarningApp).trim();
++            adbWarning = bool(json, "adb_warning", adbWarning);
+             libraryButton = bool(json, "library_button", libraryButton);
+             showLibraryPill = bool(json, "show_library_pill", showLibraryPill);
+             wifiLabelWidth = integer(json, "wifi_label_width", wifiLabelWidth, 0, 300);
+@@ -742,7 +742,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarningApp);
++                settingsKeyClearTask, weatherApp, adbWarning);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index 91430d0..01300e3 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -30,6 +30,7 @@ import android.graphics.drawable.BitmapDrawable;
+ import android.graphics.drawable.ColorDrawable;
+ import android.graphics.drawable.Drawable;
+ import android.graphics.drawable.GradientDrawable;
++import android.graphics.drawable.LayerDrawable;
+ import android.media.tv.TvContract;
+ import android.media.tv.TvInputInfo;
+ import android.media.tv.TvInputManager;
+@@ -60,6 +61,7 @@ import android.view.View;
+ import android.view.SoundEffectConstants;
+ import android.view.ViewGroup;
+ import android.view.ViewTreeObserver;
++import android.text.Layout;
+ import android.view.Window;
+ import android.view.animation.AnimationUtils;
+ import android.view.animation.LayoutAnimationController;
+@@ -205,9 +207,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     private GameDay gameDay;
+     /** weather_app: the weather beside the date; null when the key is off. */
+     private WeatherNow weather;
+-    /** adb_warning_app: the red button shown while ADB is reachable over the network, and the app it opens. */
+-    private TextView btnAdb;
+-    private String adbWarningApp = "";
++    /** adb_warning: while ADB is reachable over the network, a red greeting and a red dot on the library button. */
++    private boolean adbWarning;
++    private boolean adbOpen;
++    private static final int ADB_RED = 0xFFFF7B70;
++    /** show_greeting, so the greeting comes back hidden after an ADB warning that showed it. */
++    private boolean greetingOn = true;
+     /** Watches the ADB switches while Home is on screen; null otherwise. */
+     private ContentObserver adbObserver;
+     private View raceBar;
+@@ -555,6 +560,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         clockBlock = findViewById(R.id.leftBlock);
+         clockRefresh = new ClockRefresh(clockBlock);
+         greetingColor = greeting.getCurrentTextColor();
++        greetingOn = cfg.showGreeting;
+         if (!cfg.showGreeting) greeting.setVisibility(View.GONE);
+         // Keep the other header layouts as designed: their extra lines change the block's centre.
+         if (!cfg.showGreeting && !cfg.dateBelowClock && !cfg.shamsiDate && !cfg.lunarDate
+@@ -621,13 +627,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         vpnApp = cfg.vpnApp;
+         vpnPill = cfg.vpnPill && !cfg.topMenu;
+         btnVpn = findViewById(R.id.btnVpn);
+-        btnAdb = findViewById(R.id.btnAdb);
+-        adbWarningApp = cfg.adbWarningApp;
+-        // Styled as the red "VPN off" pill: dark glass outlined in red at rest, solid red with a white ring focused.
+-        btnAdb.setBackground(VpnBadge.pillBackground(false, density));
+-        btnAdb.setCompoundDrawableTintList(new ColorStateList(
+-                new int[][]{new int[]{android.R.attr.state_focused}, new int[0]},
+-                new int[]{VpnBadge.pillInkColor(false, true), VpnBadge.pillInkColor(false, false)}));
++        adbWarning = cfg.adbWarning;
+         moduleCards = cfg.moduleCards;
+         hiddenApps = new HashSet<>(cfg.hiddenApps);
+         libraryExcludedApps = new HashSet<>(cfg.libraryExcludedApps);
+@@ -841,7 +841,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         btnInputs.setOnClickListener(v -> showInputs());
+         btnWifi.setOnClickListener(v -> openNetworkPill());
+         btnVpn.setOnClickListener(v -> openVpnPill());
+-        btnAdb.setOnClickListener(v -> openAdbWarningApp());
+         btnWifi.setOnLongClickListener(v -> {
+             open(systemIntent(Settings.ACTION_WIFI_SETTINGS));
+             return true;
+@@ -938,10 +937,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         btnSettings.setOnKeyListener(pillKeys);
+         btnReorder.setOnKeyListener(pillKeys);
+         btnLibraryTop.setOnKeyListener(pillKeys);
+-        btnAdb.setOnKeyListener(pillKeys);
+         for (View button : topAppButtons) button.setOnKeyListener(pillKeys);
+         if (advancedEffects) {
+-            List<View> pills = new ArrayList<>(Arrays.asList(btnAdb, btnInputs, btnWifi, btnVpn, btnReorder, btnLibraryTop, btnSettings));
++            List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnVpn, btnReorder, btnLibraryTop, btnSettings));
+             pills.addAll(topAppButtons);
+             for (View button : pills) {
+                 button.setOnFocusChangeListener((view, focused) -> view.animate()
+@@ -2813,7 +2811,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             else res = R.string.good_night;
+         }
+         String festiveGreeting = festive ? festival.greetingText(getResources()) : "";
+-        if (!festiveGreeting.isEmpty()) {
++        greeting.setVisibility(greetingOn || adbOpen ? View.VISIBLE : View.GONE);
++        if (adbOpen) {
++            // adb_warning: the greeting's line, so the header keeps its width for the clock, date and weather.
++            greeting.setText(R.string.adb_open_greeting);
++            greeting.setTextColor(ADB_RED);
++        } else if (!festiveGreeting.isEmpty()) {
+             greeting.setText(festiveGreeting);
+             greeting.setTextColor(liftTowardsWhite(festival.accentColor(), 0.25f));
+         } else {
+@@ -3225,16 +3228,36 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+         ((ImageView) findViewById(R.id.weatherIcon)).setImageResource(WeatherNow.icon(now.code, now.day));
+         ((TextView) findViewById(R.id.weatherTemp)).setText(now.temp);
+-        ((TextView) findViewById(R.id.weatherSummary)).setText(now.summary);
++        fitLine(findViewById(R.id.weatherSummary), now.summary);
+         TextView days = findViewById(R.id.weatherDays);
+-        days.setText(now.days);
++        fitLine(days, now.days);
+         days.setVisibility(now.days.isEmpty() ? View.GONE : View.VISIBLE);
+         block.setVisibility(View.VISIBLE);
+     }
+ 
+-    /** adb_warning_app: watch the two ADB switches while Home is on screen. */
++    /**
++     * The whole line when it fits, else only its first " · " part (the sky, or tomorrow) rather than a word cut by
++     * an ellipsis: "Lluvia débil · Sensación 14°" did not fit beside a long date.
++     */
++    private static void fitLine(TextView view, String text) {
++        view.setText(text);
++        int cut = text.indexOf(" · ");
++        if (cut < 0) return;
++        view.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
++            @Override
++            public boolean onPreDraw() {
++                view.getViewTreeObserver().removeOnPreDrawListener(this);
++                Layout layout = view.getLayout();
++                if (layout == null || layout.getEllipsisCount(0) == 0 || !text.contentEquals(view.getText())) return true;
++                view.setText(text.substring(0, cut));
++                return false;
++            }
++        });
++    }
++
++    /** adb_warning: watch the two ADB switches while Home is on screen. */
+     private void startAdbWarning() {
+-        if (adbWarningApp.isEmpty()) return;
++        if (!adbWarning) return;
+         if (adbObserver == null) {
+             adbObserver = new ContentObserver(handler) {
+                 @Override
+@@ -3259,17 +3282,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+                 Settings.Global.getInt(getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1,
+                 Settings.Global.getInt(getContentResolver(), "adb_wifi_enabled", 0) == 1,
+                 AdbWarning.port(AdbWarning.prop("service.adb.tcp.port")));
+-        boolean focused = btnAdb.hasFocus();
+-        btnAdb.setVisibility(open ? View.VISIBLE : View.GONE);
+-        if (!open && focused) firstTopButton().requestFocus();
+-    }
+-
+-    /** The configured app (Remote Access switches ADB off), or Developer options when it is not installed. */
+-    private void openAdbWarningApp() {
+-        PackageManager pm = getPackageManager();
+-        Intent launch = pm.getLeanbackLaunchIntentForPackage(adbWarningApp);
+-        if (launch == null) launch = pm.getLaunchIntentForPackage(adbWarningApp);
+-        open(launch != null ? launch : systemIntent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
++        if (open == adbOpen) return;
++        adbOpen = open;
++        updateGreeting();
++        // A red dot on the library button, where Remote Access is; it takes no room in the bar.
++        btnLibraryTop.setForeground(open ? libraryDot() : null);
++    }
++
++    private Drawable libraryDot() {
++        GradientDrawable dot = new GradientDrawable();
++        dot.setShape(GradientDrawable.OVAL);
++        dot.setColor(0xFFFF5A4F);
++        dot.setStroke(Math.round(2 * density), Color.WHITE);
++        LayerDrawable layer = new LayerDrawable(new Drawable[] {dot});
++        int size = Math.round(12 * density);
++        layer.setLayerSize(0, size, size);
++        layer.setLayerGravity(0, Gravity.TOP | Gravity.RIGHT);
++        return layer;
+     }
+ 
+     /** vpn_pill: the pill outlined in green with a lock while a VPN is up, outlined in red "VPN off" while it is not;
+diff --git a/launcher/app/src/main/res/drawable/ic_terminal.xml b/launcher/app/src/main/res/drawable/ic_terminal.xml
+deleted file mode 100644
+index 289bb0d..0000000
+--- a/launcher/app/src/main/res/drawable/ic_terminal.xml
++++ /dev/null
+@@ -1,10 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<!-- ic_terminal -->
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:width="22dp" android:height="22dp"
+-    android:viewportWidth="24" android:viewportHeight="24">
+-    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
+-        android:strokeLineJoin="round" android:pathData="M5,8l4,4l-4,4" />
+-    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.7" android:strokeLineCap="round"
+-        android:strokeLineJoin="round" android:pathData="M12,16h7" />
+-</vector>
+diff --git a/launcher/app/src/main/res/layout/activity_main.xml b/launcher/app/src/main/res/layout/activity_main.xml
+index f33a60d..5d8211f 100644
+--- a/launcher/app/src/main/res/layout/activity_main.xml
++++ b/launcher/app/src/main/res/layout/activity_main.xml
+@@ -351,7 +351,7 @@
+                                 android:textColor="#A6FFFFFF"
+                                 android:textSize="13sp"
+                                 android:fontFamily="@string/font_regular"
+-                                android:letterSpacing="0.1"
++                                android:letterSpacing="0.06"
+                                 android:textAllCaps="true" />
+                             <TextView
+                                 android:id="@+id/weatherDays"
+@@ -364,7 +364,7 @@
+                                 android:textColor="#80FFFFFF"
+                                 android:textSize="13sp"
+                                 android:fontFamily="@string/font_regular"
+-                                android:letterSpacing="0.1"
++                                android:letterSpacing="0.06"
+                                 android:textAllCaps="true" />
+                         </LinearLayout>
+                     </LinearLayout>
+@@ -402,15 +402,6 @@
+                 android:clipToPadding="false"
+                 android:orientation="horizontal">
+ 
+-                <!-- adb_warning_app: shown only while ADB is reachable over the network; opens that app. -->
+-                <TextView
+-                    android:id="@+id/btnAdb"
+-                    style="@style/TopButtonIcon"
+-                    android:visibility="gone"
+-                    android:contentDescription="@string/adb_open"
+-                    android:drawableStart="@drawable/ic_terminal"
+-                    android:nextFocusDown="@+id/grid" />
+-
+                 <TextView
+                     android:id="@+id/btnInputs"
+                     style="@style/TopButton"
+diff --git a/launcher/app/src/main/res/values-es/strings.xml b/launcher/app/src/main/res/values-es/strings.xml
+index abe30d9..753e0a3 100644
+--- a/launcher/app/src/main/res/values-es/strings.xml
++++ b/launcher/app/src/main/res/values-es/strings.xml
+@@ -87,7 +87,7 @@
+     <string name="greeting_with_name">%1$s, %2$s</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN apagada</string>
+-    <string name="adb_open">ADB abierto</string>
++    <string name="adb_open_greeting">● ADB abierto · ciérralo en Acceso remoto</string>
+     <string name="home_settings">Elegir inicio predeterminado</string>
+     <string name="home_settings_help">Elige tu inicio original para dejar de usar CleanYourTV como inicio, o CleanYourTV para volver a él. El lanzador original tiene que estar activado y el televisor debe ofrecer un selector de inicio; si estaba desactivado, usa antes el script de restauración.</string>
+     <string name="rows_below_dock_label">Filas debajo del dock</string>
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 051931d..f2ca738 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -493,10 +493,10 @@
+          add-on fetches when read, never more than every 30 minutes. A theme can set "weather_app". -->
+     <string name="weather_app" translatable="false"></string>
+ 
+-    <!-- A package (e.g. the Remote Access add-on, io.github.maxhayim.remoteaccess) that a red button in the top bar
+-         opens while ADB is reachable over the network, so an open ADB is noticed. Empty = no button. A theme can
+-         set "adb_warning_app". -->
+-    <string name="adb_warning_app" translatable="false"></string>
++    <!-- While ADB is reachable over the network, the greeting turns into a red "ADB open" line and the library
++         button (library_button) gets a red dot, so an open ADB is noticed without taking room from the header.
++         Off by default. A theme can set "adb_warning". -->
++    <bool name="adb_warning">false</bool>
+ 
+     <!-- Time-of-day backdrop behind everything: a dark gradient that follows the clock, with a warm
+          horizon glow around sunrise and sunset. 0 keeps the plain background (the default); 1 to 100
+diff --git a/launcher/app/src/main/res/values/strings.xml b/launcher/app/src/main/res/values/strings.xml
+index 6d81d48..61d052b 100644
+--- a/launcher/app/src/main/res/values/strings.xml
++++ b/launcher/app/src/main/res/values/strings.xml
+@@ -46,7 +46,7 @@
+     <string name="dream_name">Clock</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN off</string>
+-    <string name="adb_open">ADB open</string>
++    <string name="adb_open_greeting">● ADB open · switch it off in Remote Access</string>
+     <string name="home_settings">Choose default home</string>
+     <string name="home_settings_help">Select your original home to stop using CleanYourTV as Home, or CleanYourTV to switch back. The original launcher must be enabled and your TV must provide a home picker; use the restore script first if it was disabled.</string>
+     <string name="launcher_settings">Launcher settings</string>
+-- 
+2.54.0.windows.1
+

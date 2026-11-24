@@ -1,0 +1,79 @@
+From b79f436334e86ed2663013d7c14f383334acd740 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 22:43:25 +0100
+Subject: [PATCH 08/23] Clock: pull a block that grows after placement back on
+ screen
+
+The weather line arrives after placeClock and grew the block downwards, so a clock placed
+low showed its last line cut off until the next minute's move.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/ClockScene.java    | 13 +++++++++++
+ .../com/gathin/tvhome/ClockSceneTest.java     | 23 +++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+ create mode 100644 launcher/app/src/test/java/com/gathin/tvhome/ClockSceneTest.java
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockScene.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockScene.java
+index d8b18de..d863fd9 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockScene.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockScene.java
+@@ -79,6 +79,14 @@ final class ClockScene {
+     /** root is the inflated dream_clock layout. */
+     ClockScene(View root) {
+         content = root.findViewById(R.id.dreamContent);
++        // The weather line arrives after placeClock and grows the block; pull it back inside instead of
++        // leaving its bottom off screen until the next move.
++        content.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
++            if (r - l == or - ol && b - t == ob - ot) return;
++            View parent = (View) content.getParent();
++            content.setX(inside(content.getX(), parent.getWidth(), r - l));
++            content.setY(inside(content.getY(), parent.getHeight(), b - t));
++        });
+         clockRefresh = new ClockRefresh(content);
+         ambient = root.findViewById(R.id.dreamAmbient);
+         glow = new GradientDrawable();
+@@ -232,6 +240,11 @@ final class ClockScene {
+         }).start();
+     }
+ 
++    /** Where a block of this size may start along one axis: no further than placeClock's 10–90 % box allows. */
++    static float inside(float pos, int parent, int size) {
++        return Math.min(pos, 0.9f * Math.max(0, parent - size));
++    }
++
+     /** A random spot that keeps the whole clock on screen, with the glow centred behind it. */
+     private void placeClock() {
+         View parent = (View) content.getParent();
+diff --git a/launcher/app/src/test/java/com/gathin/tvhome/ClockSceneTest.java b/launcher/app/src/test/java/com/gathin/tvhome/ClockSceneTest.java
+new file mode 100644
+index 0000000..f7f8fc4
+--- /dev/null
++++ b/launcher/app/src/test/java/com/gathin/tvhome/ClockSceneTest.java
+@@ -0,0 +1,23 @@
++package com.gathin.tvhome;
++
++import static org.junit.Assert.assertEquals;
++
++import org.junit.Test;
++
++public class ClockSceneTest {
++    @Test
++    public void aBlockThatGrewPastTheBoxIsPulledBackInside() {
++        // 1080 tall screen, a 200 tall block: placeClock's box ends at 0.9 × 880 = 792.
++        assertEquals(792f, ClockScene.inside(950f, 1080, 200), 0.01f);
++    }
++
++    @Test
++    public void aBlockInsideTheBoxStaysWhereItIs() {
++        assertEquals(100f, ClockScene.inside(100f, 1080, 200), 0.01f);
++    }
++
++    @Test
++    public void aBlockBiggerThanTheScreenStartsAtTheEdge() {
++        assertEquals(0f, ClockScene.inside(50f, 100, 300), 0.01f);
++    }
++}
+-- 
+2.54.0.windows.1
+

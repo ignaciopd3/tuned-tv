@@ -1,0 +1,19 @@
+Tasks: 371 total,   3 running, 368 sleeping,   0 stopped,   0 zombie
+  Mem: 16777216T total, 16777216T used,   254468K free,  47366144 buffers
+ Swap:   917500K total,   295424K used,   622076K free,   957196K cached
+400%cpu  38%user   3%nice  34%sys 325%idle   0%iow   0%irq   0%sirq   0%host
+   PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+ 25139 u0_a50       20   0 2.2G 173M 135M S 21.8   6.3 234:30.82 com.google.android.katniss:interactor
+ 28137 shell        20   0 9.0M 3.6M 2.9M R 18.7   0.1   0:00.08 top -b -n 1 -m 15
+   591 root         20   0 478M  22M  13M S  9.3   0.8 369:08.26 sitatvservice
+   376 audioserver  20   0 407M  13M 6.1M S  6.2   0.4 202:32.67 mstar.hardware.audio.service
+   853 system       18  -2 2.3G 286M 236M S  3.1  10.4  29:56.01 system_server
+   419 system       -3  -8 153M  29M  25M S  3.1   1.0  39:28.57 surfaceflinger
+   414 audioserver  20   0  70M 7.1M 4.9M S  3.1   0.2  58:34.04 audioserver
+    10 root         20   0    0    0    0 R  3.1   0.0   4:15.98 [rcu_preempt]
+ 28011 root         20   0    0    0    0 I  0.0   0.0   0:00.00 [kworker/3:0-mm_percpu_wq]
+ 27980 root         20   0    0    0    0 I  0.0   0.0   0:00.03 [kworker/u8:1-EventGroupWorkQueue]
+ 27965 root          0 -20    0    0    0 I  0.0   0.0   0:00.00 [kworker/0:1H-kblockd]
+ 27961 root          0 -20    0    0    0 I  0.0   0.0   0:00.01 [kworker/u9:2-mali_jd]
+ 27960 root          0 -20    0    0    0 I  0.0   0.0   0:00.01 [kworker/2:2H-kblockd]
+ 27952 root         20   0    0    0    0 I  0.0   0.0   0:00.15 [kworker/0:2-events_power_efficient]

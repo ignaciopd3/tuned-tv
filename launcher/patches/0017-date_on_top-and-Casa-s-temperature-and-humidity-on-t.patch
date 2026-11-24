@@ -1,0 +1,511 @@
+From 1a99b0a4cd3e387576f2d8c9e5574749f628b00b Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 23:08:18 +0100
+Subject: [PATCH 17/23] date_on_top, and Casa's temperature and humidity on the
+ clock screens
+
+date_on_top: the date takes the greeting's line, so the weather beside the clock
+shows the whole sky on one line and the feels-like and next days on the second,
+where it used to cut "Parcialmente nublado" and drop the feels-like; the ADB
+warning shortens to a badge at the end of the date's line.
+
+ClockCasa (casa_row): on ClockActivity and the ClockDream screensaver, the
+weather goes under "Outside" and Casa's living-room temperature and humidity sit
+beside it under "Home"; without a reading from Casa the clock looks as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/com/gathin/tvhome/ClockActivity.java |  10 +-
+ .../java/com/gathin/tvhome/ClockCasa.java     | 173 ++++++++++++++++++
+ .../java/com/gathin/tvhome/ClockDream.java    |   7 +
+ .../main/java/com/gathin/tvhome/Config.java   |  12 +-
+ .../java/com/gathin/tvhome/MainActivity.java  |  58 +++++-
+ .../src/main/res/drawable/ic_casa_house.xml   |   8 +
+ .../app/src/main/res/values-es/strings.xml    |   3 +
+ launcher/app/src/main/res/values/config.xml   |   4 +
+ launcher/app/src/main/res/values/strings.xml  |   3 +
+ 9 files changed, 272 insertions(+), 6 deletions(-)
+ create mode 100644 launcher/app/src/main/java/com/gathin/tvhome/ClockCasa.java
+ create mode 100644 launcher/app/src/main/res/drawable/ic_casa_house.xml
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
+index fd2d8e0..7dff9b5 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockActivity.java
+@@ -23,6 +23,8 @@ public class ClockActivity extends Activity {
+     private ClockScene scene;
+     /** weather_app: the weather under the date, as on the screensaver; null when the key is off. */
+     private WeatherNow weather;
++    /** casa_row: Casa's temperature and humidity beside the weather; null without Casa. */
++    private ClockCasa casa;
+ 
+     @Override
+     @SuppressWarnings("deprecation")
+@@ -36,7 +38,11 @@ public class ClockActivity extends Activity {
+         scene = new ClockScene(getWindow().getDecorView());
+         scene.useHomeWallpaper(this);
+         weather = WeatherNow.create(this, cfg.weatherApp, new Handler(Looper.getMainLooper()),
+-                () -> WeatherNow.showOnClock(findViewById(R.id.dreamWeather), weather.now()));
++                () -> {
++                    WeatherNow.showOnClock(findViewById(R.id.dreamWeather), weather.now());
++                    if (casa != null) casa.relabel();
++                });
++        casa = ClockCasa.attach(this, getWindow().getDecorView(), cfg.casaRow);
+     }
+ 
+     @Override
+@@ -44,12 +50,14 @@ public class ClockActivity extends Activity {
+         super.onResume();
+         scene.start();
+         if (weather != null) weather.start();
++        if (casa != null) casa.start();
+     }
+ 
+     @Override
+     protected void onPause() {
+         scene.stop();
+         if (weather != null) weather.stop();
++        if (casa != null) casa.stop();
+         super.onPause();
+         finish();   // never left behind in the back stack
+     }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockCasa.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockCasa.java
+new file mode 100644
+index 0000000..42ede86
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockCasa.java
+@@ -0,0 +1,173 @@
++package com.gathin.tvhome;
++
++import android.content.Context;
++import android.database.ContentObserver;
++import android.database.Cursor;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.Looper;
++import android.util.TypedValue;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * casa_row on the clock screens (ClockActivity and the ClockDream screensaver): the weather line goes under an
++ * "Outside" label and Casa's living-room temperature and humidity sit beside it under "Home", read from Casa's provider
++ * and kept current while the clock shows. Without a reading from Casa the labels and the Home column hide, and the
++ * weather line looks as it always did.
++ */
++final class ClockCasa {
++    private static final String NO_VALUE = "—";
++
++    private final Context ctx;
++    private final Uri now;
++    private final float density;
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final ExecutorService io = Executors.newSingleThreadExecutor();
++    private final TextView weatherLine, outsideLabel, temperature, humidity;
++    private final LinearLayout homeColumn;
++    private final ContentObserver observer;
++    private boolean watching, hasReading;
++
++    /** The columns when Casa is installed and answers; null otherwise, and the clock stays as it was. */
++    static ClockCasa attach(Context ctx, View root, String pkg) {
++        if (pkg == null || pkg.isEmpty() || ctx.getPackageManager().resolveContentProvider(pkg + ".now", 0) == null) return null;
++        return new ClockCasa(ctx, root, pkg);
++    }
++
++    private ClockCasa(Context ctx, View root, String pkg) {
++        this.ctx = ctx;
++        this.now = Uri.parse("content://" + pkg + ".now/now");
++        this.density = ctx.getResources().getDisplayMetrics().density;
++        weatherLine = root.findViewById(R.id.dreamWeather);
++        ViewGroup block = (ViewGroup) weatherLine.getParent();
++        int at = block.indexOfChild(weatherLine);
++        ViewGroup.LayoutParams lineParams = weatherLine.getLayoutParams();
++        block.removeView(weatherLine);
++
++        LinearLayout outside = column();
++        outsideLabel = label(R.string.clock_outside);
++        outside.addView(outsideLabel);
++        outside.addView(weatherLine, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
++                ViewGroup.LayoutParams.WRAP_CONTENT));
++
++        homeColumn = column();
++        homeColumn.addView(label(R.string.clock_home));
++        LinearLayout values = new LinearLayout(ctx);
++        values.setOrientation(LinearLayout.HORIZONTAL);
++        temperature = value(R.drawable.ic_casa_house);
++        humidity = value(R.drawable.ic_casa_drop);
++        values.addView(temperature);
++        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
++                ViewGroup.LayoutParams.WRAP_CONTENT);
++        hlp.setMarginStart(px(18));
++        values.addView(humidity, hlp);
++        homeColumn.addView(values);
++
++        LinearLayout pair = new LinearLayout(ctx);
++        pair.setOrientation(LinearLayout.HORIZONTAL);
++        pair.addView(outside);
++        pair.addView(homeColumn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
++                ViewGroup.LayoutParams.WRAP_CONTENT));
++        block.addView(pair, at, lineParams);   // where the weather line was, with its margins
++
++        observer = new ContentObserver(main) {
++            @Override
++            public void onChange(boolean selfChange) {
++                refresh();
++            }
++        };
++        relabel();
++    }
++
++    private LinearLayout column() {
++        LinearLayout c = new LinearLayout(ctx);
++        c.setOrientation(LinearLayout.VERTICAL);
++        return c;
++    }
++
++    /** A small spaced capital label, quieter than the line under it. */
++    private TextView label(int text) {
++        TextView t = new TextView(ctx);
++        t.setText(text);
++        t.setAllCaps(true);
++        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
++        t.setLetterSpacing(0.2f);
++        t.setTextColor(0x80FFFFFF);
++        t.setTypeface(weatherLine.getTypeface());
++        t.setPaddingRelative(0, 0, 0, px(6));
++        return t;
++    }
++
++    /** A value in the weather line's own size, colour and icon tint. */
++    private TextView value(int icon) {
++        TextView t = new TextView(ctx);
++        t.setTextSize(TypedValue.COMPLEX_UNIT_PX, weatherLine.getTextSize());
++        t.setTextColor(weatherLine.getTextColors());
++        t.setTypeface(weatherLine.getTypeface());
++        t.setLetterSpacing(weatherLine.getLetterSpacing());
++        t.setGravity(weatherLine.getGravity());
++        android.graphics.drawable.Drawable d = ctx.getDrawable(icon);
++        int size = Math.round(weatherLine.getTextSize() * 1.25f);   // as tall as the weather icon beside it
++        d.setBounds(0, 0, size, size);
++        t.setCompoundDrawablesRelative(d, null, null, null);
++        t.setCompoundDrawablePadding(px(8));
++        t.setCompoundDrawableTintList(weatherLine.getCompoundDrawableTintList());
++        t.setSingleLine(true);
++        t.setText(NO_VALUE);
++        return t;
++    }
++
++    /** Labels only when both columns show; without the weather the Home column starts where the line did. */
++    void relabel() {
++        boolean weatherShown = weatherLine.getVisibility() == View.VISIBLE;
++        homeColumn.setVisibility(hasReading ? View.VISIBLE : View.GONE);
++        outsideLabel.setVisibility(hasReading && weatherShown ? View.VISIBLE : View.GONE);
++        homeColumn.getChildAt(0).setVisibility(hasReading && weatherShown ? View.VISIBLE : View.GONE);
++        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) homeColumn.getLayoutParams();
++        lp.setMarginStart(weatherShown ? px(48) : 0);
++        homeColumn.setLayoutParams(lp);
++    }
++
++    void start() {
++        if (!watching) {
++            ctx.getContentResolver().registerContentObserver(now, false, observer);
++            watching = true;
++        }
++        refresh();
++    }
++
++    void stop() {
++        if (watching) ctx.getContentResolver().unregisterContentObserver(observer);
++        watching = false;
++    }
++
++    private void refresh() {
++        io.execute(() -> {
++            String t = NO_VALUE, h = NO_VALUE;
++            try (Cursor c = ctx.getContentResolver().query(now, null, null, null, null)) {
++                if (c != null && c.moveToFirst()) {
++                    t = c.getString(c.getColumnIndexOrThrow("temperature"));
++                    h = c.getString(c.getColumnIndexOrThrow("humidity"));
++                }
++            } catch (RuntimeException unavailable) {
++                // Casa is starting or gone: no Home column until it answers.
++            }
++            String ft = t, fh = h;
++            main.post(() -> {
++                hasReading = ft != null && !NO_VALUE.equals(ft);
++                temperature.setText(ft);
++                humidity.setText(fh);
++                relabel();
++            });
++        });
++    }
++
++    private int px(float dp) {
++        return Math.round(dp * density);
++    }
++}
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+index e7c91a2..3c23895 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+@@ -13,6 +13,8 @@ public class ClockDream extends DreamService {
+     private ClockScene scene;
+     /** weather_app: the weather under the date; null when the key is off. */
+     private WeatherNow weather;
++    /** casa_row: Casa's temperature and humidity beside the weather; null without Casa. */
++    private ClockCasa casa;
+ 
+     @Override
+     protected void attachBaseContext(android.content.Context base) {
+@@ -31,6 +33,7 @@ public class ClockDream extends DreamService {
+         scene = new ClockScene(getWindow().getDecorView());
+         scene.useHomeWallpaper(this);
+         weather = WeatherNow.create(this, cfg.weatherApp, new Handler(Looper.getMainLooper()), this::showWeather);
++        casa = ClockCasa.attach(this, getWindow().getDecorView(), cfg.casaRow);
+     }
+ 
+     @Override
+@@ -38,12 +41,14 @@ public class ClockDream extends DreamService {
+         super.onDreamingStarted();
+         scene.start();
+         if (weather != null) weather.start();
++        if (casa != null) casa.start();
+     }
+ 
+     @Override
+     public void onDreamingStopped() {
+         scene.stop();
+         if (weather != null) weather.stop();
++        if (casa != null) casa.stop();
+         super.onDreamingStopped();
+     }
+ 
+@@ -51,6 +56,7 @@ public class ClockDream extends DreamService {
+     public void onDetachedFromWindow() {
+         if (scene != null) scene.stop();
+         if (weather != null) weather.shutdown();
++        if (casa != null) casa.stop();
+         super.onDetachedFromWindow();
+     }
+ 
+@@ -58,5 +64,6 @@ public class ClockDream extends DreamService {
+     private void showWeather() {
+         WeatherNow.showOnClock(getWindow().getDecorView().findViewById(R.id.dreamWeather),
+                 weather == null ? null : weather.now());
++        if (casa != null) casa.relabel();
+     }
+ }
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index a9d9c80..96baffd 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -150,6 +150,11 @@ final class Config {
+     final boolean topBarCapsule;
+     /** casa_row: the Casa add-on's package; its light, heater and climate go in a second row under the top bar. */
+     final String casaRow;
++    /**
++     * date_on_top: the date on the greeting's line, so the weather beside the clock has room for the whole sky, the
++     * feels-like and the next days; the ADB warning becomes a short badge at the end of that line.
++     */
++    final boolean dateOnTop;
+     /** App library as a round button in the top bar (config.xml library_button); needs app_library. */
+     final boolean libraryButton;
+     /** The App library pill after the last Home row; false hides it while libraryButton is on (show_library_pill). */
+@@ -312,8 +317,9 @@ final class Config {
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+                    boolean settingsKeyClearTask, String weatherApp, boolean adbWarning,
+-                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp, String casaRow) {
++                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp, String casaRow, boolean dateOnTop) {
+         this.casaRow = casaRow;
++        this.dateOnTop = dateOnTop;
+         this.weatherApp = weatherApp;
+         this.vpnAppPerApp = vpnAppPerApp;
+         this.adbWarning = adbWarning;
+@@ -520,6 +526,7 @@ final class Config {
+         String vpn = res.getString(R.string.vpn_app).trim();
+         String vpnPerApp = res.getString(R.string.vpn_app_per_app).trim();
+         String casaRow = res.getString(R.string.casa_row).trim();
++        boolean dateOnTop = res.getBoolean(R.bool.date_on_top);
+         boolean homeSettings = res.getBoolean(R.bool.show_home_settings_shortcut);
+         boolean showStats = res.getBoolean(R.bool.show_stats);
+         String gameDay = res.getString(R.string.game_day).trim();
+@@ -643,6 +650,7 @@ final class Config {
+             vpn = string(json, "vpn_app", vpn);
+             vpnPerApp = string(json, "vpn_app_per_app", vpnPerApp);
+             casaRow = string(json, "casa_row", casaRow);
++            dateOnTop = bool(json, "date_on_top", dateOnTop);
+             homeSettings = bool(json, "show_home_settings_shortcut", homeSettings);
+             showStats = bool(json, "show_stats", showStats);
+             gameDay = string(json, "game_day", gameDay);
+@@ -763,7 +771,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp, casaRow);
++                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp, casaRow, dateOnTop);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index bbdb4ba..5ad9856 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -186,6 +186,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     private boolean animations;
+     private boolean advancedEffects;
+     private TextView greeting;
++    /** date_on_top: the date on the greeting's line, in the date's own colour, and the ADB badge at its end. */
++    private boolean dateOnTop;
++    private TextView adbBadge;
++    private int dateColor;
+     private View clockBlock;
+     private View btnInputs;
+     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
+@@ -566,6 +570,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         greetingColor = greeting.getCurrentTextColor();
+         greetingOn = cfg.showGreeting;
+         if (!cfg.showGreeting) greeting.setVisibility(View.GONE);
++        dateOnTop = cfg.dateOnTop;
++        if (dateOnTop) putDateOnTop();
+         // Keep the other header layouts as designed: their extra lines change the block's centre.
+         if (!cfg.showGreeting && !cfg.dateBelowClock && !cfg.shamsiDate && !cfg.lunarDate
+                 && !cfg.topMenu && !getResources().getBoolean(R.bool.rtl_menu_bar)) {
+@@ -2637,6 +2643,37 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         return bg;
+     }
+ 
++    /**
++     * date_on_top: the date moves to the greeting's line, so the weather beside the clock has the row to itself; the ADB
++     * warning shortens to a badge at the end of that line.
++     */
++    private void putDateOnTop() {
++        TextView date = findViewById(R.id.date);
++        dateColor = date.getCurrentTextColor();
++        ((View) date.getParent()).setVisibility(View.GONE);
++        findViewById(R.id.clockDivider).setVisibility(View.GONE);   // the weather block brings its own line
++        ViewGroup block = (ViewGroup) greeting.getParent();
++        int at = block.indexOfChild(greeting);
++        ViewGroup.LayoutParams lineParams = greeting.getLayoutParams();
++        block.removeView(greeting);
++        LinearLayout line = new LinearLayout(this);
++        line.setOrientation(LinearLayout.HORIZONTAL);
++        line.setGravity(Gravity.CENTER_VERTICAL);
++        line.addView(greeting, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++        adbBadge = new TextView(this);
++        adbBadge.setTextSize(TypedValue.COMPLEX_UNIT_PX, greeting.getTextSize());
++        adbBadge.setTypeface(greeting.getTypeface());
++        adbBadge.setLetterSpacing(greeting.getLetterSpacing());
++        adbBadge.setSingleLine(true);
++        adbBadge.setAllCaps(true);   // after setSingleLine, which would replace the capitals transformation
++        adbBadge.setTextColor(ADB_RED);
++        adbBadge.setText(R.string.adb_open_badge);
++        adbBadge.setVisibility(View.GONE);
++        line.addView(adbBadge, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
++                ViewGroup.LayoutParams.WRAP_CONTENT));
++        block.addView(line, at, lineParams);
++    }
++
+     /** Centre the one-row header when the greeting and extra date lines are absent (#2265). */
+     private void centerCompactHeader() {
+         LinearLayout clockRow = (LinearLayout) findViewById(R.id.clock).getParent();
+@@ -2883,6 +2920,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             else if (hour < 22) res = R.string.good_evening;
+             else res = R.string.good_night;
+         }
++        if (dateOnTop && adbBadge != null) {
++            greeting.setVisibility(View.VISIBLE);
++            greeting.setText(android.text.format.DateFormat.format(getString(R.string.date_format), System.currentTimeMillis()));
++            greeting.setTextColor(dateColor);
++            adbBadge.setVisibility(adbOpen ? View.VISIBLE : View.GONE);
++            return;
++        }
+         String festiveGreeting = festive ? festival.greetingText(getResources()) : "";
+         greeting.setVisibility(greetingOn || adbOpen ? View.VISIBLE : View.GONE);
+         if (adbOpen) {
+@@ -3314,10 +3358,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+         ((ImageView) findViewById(R.id.weatherIcon)).setImageResource(WeatherNow.icon(now.code, now.day));
+         ((TextView) findViewById(R.id.weatherTemp)).setText(now.temp);
+-        fitLine(findViewById(R.id.weatherSummary), now.summary);
+         TextView days = findViewById(R.id.weatherDays);
+-        fitLine(days, now.days);
+-        days.setVisibility(now.days.isEmpty() ? View.GONE : View.VISIBLE);
++        String first = now.summary, second = now.days;
++        if (dateOnTop) {
++            // The whole sky on the first line, then the feels-like and the next days: the row has room for both.
++            int cut = now.summary.indexOf(" · ");
++            first = cut < 0 ? now.summary : now.summary.substring(0, cut);
++            String rest = cut < 0 ? "" : now.summary.substring(cut + 3);
++            second = rest.isEmpty() ? now.days : now.days.isEmpty() ? rest : rest + " · " + now.days;
++        }
++        fitLine(findViewById(R.id.weatherSummary), first);
++        fitLine(days, second);
++        days.setVisibility(second.isEmpty() ? View.GONE : View.VISIBLE);
+         block.setVisibility(View.VISIBLE);
+     }
+ 
+diff --git a/launcher/app/src/main/res/drawable/ic_casa_house.xml b/launcher/app/src/main/res/drawable/ic_casa_house.xml
+new file mode 100644
+index 0000000..e2597a7
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_casa_house.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- casa_row on the clock screens: the home, a 1.5 stroke like the other Casa icons. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000"
++        android:pathData="M3.5,11.2L12,4.2l8.5,7M5.8,9.6v10.2h12.4V9.6M10.2,19.8v-5h3.6v5" />
++</vector>
+diff --git a/launcher/app/src/main/res/values-es/strings.xml b/launcher/app/src/main/res/values-es/strings.xml
+index 889b678..46d3f65 100644
+--- a/launcher/app/src/main/res/values-es/strings.xml
++++ b/launcher/app/src/main/res/values-es/strings.xml
+@@ -87,6 +87,9 @@
+     <string name="greeting_with_name">%1$s, %2$s</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN apagada</string>
++    <string name="adb_open_badge">● ADB abierto</string>
++    <string name="clock_outside">Fuera</string>
++    <string name="clock_home">Casa</string>
+     <string name="adb_open_greeting">● ADB abierto · ciérralo en Acceso remoto</string>
+     <string name="home_settings">Elegir inicio predeterminado</string>
+     <string name="home_settings_help">Elige tu inicio original para dejar de usar CleanYourTV como inicio, o CleanYourTV para volver a él. El lanzador original tiene que estar activado y el televisor debe ofrecer un selector de inicio; si estaba desactivado, usa antes el script de restauración.</string>
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 4b6d2b8..46dfe77 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -307,6 +307,10 @@
+          in the same dark glass, holds the living-room light and the heater (OK switches them; amber or orange while
+          on) and the room's temperature and humidity. Empty, or Casa not installed: no row. -->
+     <string name="casa_row" translatable="false"></string>
++    <!-- The date on the greeting's line instead of beside the clock, so the weather there shows the whole sky, the
++         feels-like and the next days on two lines; with adb_warning, the warning becomes a short badge at the end of
++         that line. Can also be set with "date_on_top" in a theme. -->
++    <bool name="date_on_top">false</bool>
+     <!-- The VPN as its own pill after the network pill, instead of a badge inside it: solid green with a lock while a
+          VPN is up, solid red "VPN off" while none is and vpn_app is installed. Pressing it opens vpn_app (without it,
+          the App library, or VPN settings when app_library is off), and the network pill then always opens Wi-Fi
+diff --git a/launcher/app/src/main/res/values/strings.xml b/launcher/app/src/main/res/values/strings.xml
+index 2664b23..c7d51b8 100644
+--- a/launcher/app/src/main/res/values/strings.xml
++++ b/launcher/app/src/main/res/values/strings.xml
+@@ -46,6 +46,9 @@
+     <string name="dream_name">Clock</string>
+     <string name="vpn">VPN</string>
+     <string name="vpn_off">VPN off</string>
++    <string name="adb_open_badge">● ADB open</string>
++    <string name="clock_outside">Outside</string>
++    <string name="clock_home">Home</string>
+     <string name="adb_open_greeting">● ADB open · switch it off in Remote Access</string>
+     <string name="home_settings">Choose default home</string>
+     <string name="home_settings_help">Select your original home to stop using CleanYourTV as Home, or CleanYourTV to switch back. The original launcher must be enabled and your TV must provide a home picker; use the restore script first if it was disabled.</string>
+-- 
+2.54.0.windows.1
+

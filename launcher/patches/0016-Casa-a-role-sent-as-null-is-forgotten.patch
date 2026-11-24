@@ -1,0 +1,28 @@
+From 623ab59890e871c913d8069c2c511540310e8ae4 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 19:13:31 +0100
+Subject: [PATCH 16/23] Casa: a role sent as null is forgotten
+
+For a device that broke or was removed: the PC sends "gas": null and Casa
+drops it, so it stops trying to reach it and warning that it is down.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../app/src/main/java/io/github/ignaciopd3/casa/Devices.java     | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+index 4e829de..9889833 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+@@ -78,6 +78,7 @@ final class Devices {
+         JSONObject all = new JSONObject(json);
+         SharedPreferences.Editor e = prefs(ctx).edit();
+         for (String role : parsed.keySet()) e.putString(role, all.getJSONObject(role).toString());
++        for (String role : ROLES) if (all.has(role) && all.isNull(role)) e.remove(role);   // sent as null: forget it
+         e.apply();
+     }
+ 
+-- 
+2.54.0.windows.1
+

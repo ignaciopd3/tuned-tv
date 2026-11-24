@@ -1,0 +1,5 @@
+# Addons de cleanyourtv que se compilan e instalan con este launcher: <carpeta en addons/> <paquete>
+# A cada uno se le concede APP_AUTO_START (el firmware de TCL no deja arrancar en segundo plano a las apps instaladas).
+weather io.github.sumyabazar1.weather
+remote-access io.github.maxhayim.remoteaccess
+casa io.github.ignaciopd3.casa

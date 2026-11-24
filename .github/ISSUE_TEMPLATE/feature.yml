@@ -1,0 +1,15 @@
+name: Idea / Feature
+description: Something Tuned TV could do · Algo que Tuned TV podría hacer
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea / La idea
+      description: What, and the problem it solves · Qué, y qué problema resuelve
+    validations:
+      required: true
+  - type: input
+    id: tvs
+    attributes:
+      label: Which TVs or systems? / ¿Qué teles o sistemas?

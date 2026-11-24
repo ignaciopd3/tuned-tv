@@ -1,0 +1,358 @@
+From cbc75ed68df83f50fac82016b7611727e7150cfa Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 11:21:35 +0100
+Subject: [PATCH 15/23] Casa stays up through the launcher's binding, not as a
+ foreground service
+
+TCL's TclAppBoot refuses startForeground to an app started in the background
+(bootType start_foreground, reason default_borbid), so CasaService crashed on
+start. The launcher now binds it for as long as Home lives; Casa's own parts
+talk to it in-process, and the boot receiver and foreground permissions go.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ addons/casa/app/src/main/AndroidManifest.xml  | 17 +-----
+ .../github/ignaciopd3/casa/BootReceiver.java  | 13 ----
+ .../github/ignaciopd3/casa/CasaProvider.java  |  7 +--
+ .../github/ignaciopd3/casa/CasaService.java   | 59 ++++++++-----------
+ .../ignaciopd3/casa/ImportActivity.java       |  8 ++-
+ .../github/ignaciopd3/casa/ToggleService.java |  2 +-
+ .../casa/app/src/main/res/values/strings.xml  |  2 +-
+ .../main/java/com/gathin/tvhome/CasaRow.java  | 38 ++++++++++--
+ 8 files changed, 71 insertions(+), 75 deletions(-)
+ delete mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
+
+diff --git a/addons/casa/app/src/main/AndroidManifest.xml b/addons/casa/app/src/main/AndroidManifest.xml
+index 6dfcf93..f1d0d5c 100644
+--- a/addons/casa/app/src/main/AndroidManifest.xml
++++ b/addons/casa/app/src/main/AndroidManifest.xml
+@@ -5,10 +5,6 @@
+ 
+     <!-- Talking to the smart plugs over the home network (Tuya LAN protocol, port 6668). -->
+     <uses-permission android:name="android.permission.INTERNET" />
+-    <!-- Staying up for the alerts (TCL stops background work) and coming back with the TV. -->
+-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <!-- The door and gas messages over any channel or app; granted from the PC (appops). -->
+     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+ 
+@@ -52,18 +48,11 @@
+             android:name=".ToggleService"
+             android:exported="false" />
+ 
++        <!-- Kept up by the launcher, which binds to it (signature permission) for as long as it runs. -->
+         <service
+             android:name=".CasaService"
+-            android:exported="false"
+-            android:foregroundServiceType="dataSync" />
+-
+-        <receiver
+-            android:name=".BootReceiver"
+-            android:exported="true">
+-            <intent-filter>
+-                <action android:name="android.intent.action.BOOT_COMPLETED" />
+-            </intent-filter>
+-        </receiver>
++            android:exported="true"
++            android:permission="io.github.ignaciopd3.casa.permission.CONTROL" />
+ 
+         <!-- The launcher row reads the state here; only apps with the signature permission (the launcher) can. -->
+         <provider
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
+deleted file mode 100644
+index 3514ae4..0000000
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/BootReceiver.java
++++ /dev/null
+@@ -1,13 +0,0 @@
+-package io.github.ignaciopd3.casa;
+-
+-import android.content.BroadcastReceiver;
+-import android.content.Context;
+-import android.content.Intent;
+-
+-/** Brings Casa back when the TV starts (needs APP_AUTO_START allow on TCL, which tools/launcher.sh grants). */
+-public class BootReceiver extends BroadcastReceiver {
+-    @Override
+-    public void onReceive(Context context, Intent intent) {
+-        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) CasaService.start(context);
+-    }
+-}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+index c386253..bd64deb 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaProvider.java
+@@ -16,12 +16,7 @@ public class CasaProvider extends ContentProvider {
+ 
+     @Override
+     public boolean onCreate() {
+-        try {
+-            CasaService.start(getContext());   // whoever asks first brings Casa up
+-        } catch (RuntimeException notNow) {
+-            // started again by the next query or by the TV coming on
+-        }
+-        return true;
++        return true;   // the launcher binds CasaService itself; a provider starting it would be a background start
+     }
+ 
+     @Override
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+index d06dde2..13befc7 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+@@ -1,8 +1,5 @@
+ package io.github.ignaciopd3.casa;
+ 
+-import android.app.Notification;
+-import android.app.NotificationChannel;
+-import android.app.NotificationManager;
+ import android.app.Service;
+ import android.content.BroadcastReceiver;
+ import android.content.Context;
+@@ -19,16 +16,14 @@ import org.json.JSONException;
+ 
+ /**
+  * Casa running: the cloud (status at start-up, then MQTT), the gas sensor on the home network, the door messages and
+- * the state the launcher row reads (CasaProvider). A foreground service, as TCL stops background work; it comes back
+- * with the TV (BootReceiver) and whenever any part of Casa starts.
++ * the state the launcher row reads (CasaProvider). The launcher keeps it alive by binding to it for as long as its
++ * process lives, which on a TV is always: TCL forbids an app started in the background from going foreground
++ * (TclAppBoot "start_foreground ... default_borbid"), so a foreground service is not an option here. The other parts
++ * of Casa talk to it in-process (running()), never by asking the system to start it from the background.
+  */
+ public class CasaService extends Service implements MqttWatch.Listener, GasWatch.Listener {
+     static final Uri NOW = Uri.parse("content://io.github.ignaciopd3.casa.now/now");
+-    static final String ACTION_STATE = "io.github.ignaciopd3.casa.STATE", ACTION_RELOAD = "io.github.ignaciopd3.casa.RELOAD",
+-            ACTION_SIMULATE = "io.github.ignaciopd3.casa.SIMULATE";
+-    static final String EXTRA_ROLE = "role", EXTRA_ON = "on", EXTRA_WHAT = "what";
+     private static final long WARN_AFTER_MS = 5 * 60_000L, HEALTH_EVERY_MS = 60_000L;
+-    private static final String CHANNEL = "casa";
+ 
+     /** What Casa knows now; CasaProvider answers from it. Replaced, never mutated, so readers see a whole state. */
+     static volatile State state = new State();
+@@ -63,43 +58,39 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         }
+     };
+ 
+-    static void start(Context ctx) {
+-        ctx.startForegroundService(new Intent(ctx, CasaService.class));
++    private static volatile CasaService running;
++
++    /** The service when the launcher has it up, else null (then the cloud reports the state on its own). */
++    static CasaService running() {
++        return running;
+     }
+ 
+     /** A plug switched from the TV (ToggleService): the row shows it at once, before the cloud says so. */
+-    static void reportSwitch(Context ctx, String role, boolean on) {
+-        ctx.startForegroundService(new Intent(ctx, CasaService.class).setAction(ACTION_STATE)
+-                .putExtra(EXTRA_ROLE, role).putExtra(EXTRA_ON, on));
++    static void reportSwitch(String role, boolean on) {
++        CasaService s = running;
++        if (s != null) s.main.post(() -> s.apply(role, Roles.Field.ON, on));
++    }
++
++    /** New configuration from the PC (ImportActivity): reconnect with it. */
++    void reload() {
++        main.post(this::startWatchers);
++    }
++
++    /** ADB-only tests of the messages. */
++    void simulateNow(String what) {
++        main.post(() -> simulate(what));
+     }
+ 
+     @Override
+     public void onCreate() {
+         super.onCreate();
+-        NotificationManager nm = getSystemService(NotificationManager.class);
+-        nm.createNotificationChannel(new NotificationChannel(CHANNEL, getString(R.string.app_name), NotificationManager.IMPORTANCE_MIN));
+-        Notification n = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_bulb)
+-                .setContentTitle(getString(R.string.app_name)).setContentText(getString(R.string.service_running)).build();
+-        startForeground(1, n);
++        running = this;
+         overlay = new Overlay(this);
+         registerReceiver(screenOn, new IntentFilter(Intent.ACTION_SCREEN_ON));
+         startWatchers();
+         main.postDelayed(health, HEALTH_EVERY_MS);
+     }
+ 
+-    @Override
+-    public int onStartCommand(Intent intent, int flags, int startId) {
+-        String action = intent == null ? null : intent.getAction();
+-        if (ACTION_STATE.equals(action)) {
+-            apply(intent.getStringExtra(EXTRA_ROLE), Roles.Field.ON, intent.getBooleanExtra(EXTRA_ON, false));
+-        } else if (ACTION_RELOAD.equals(action)) {
+-            startWatchers();
+-        } else if (ACTION_SIMULATE.equals(action)) {
+-            simulate(intent.getStringExtra(EXTRA_WHAT));
+-        }
+-        return START_STICKY;
+-    }
+-
+     // ---- watchers ----
+ 
+     private void startWatchers() {
+@@ -289,6 +280,7 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+ 
+     @Override
+     public void onDestroy() {
++        running = null;
+         stopWatchers();
+         main.removeCallbacksAndMessages(null);
+         overlay.dismissGas();
+@@ -296,8 +288,9 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         super.onDestroy();
+     }
+ 
++    /** The launcher binds to keep Casa up; there is nothing to call through the binder. */
+     @Override
+     public IBinder onBind(Intent intent) {
+-        return null;
++        return new android.os.Binder();
+     }
+ }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+index d0ca6fd..0a700de 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+@@ -20,8 +20,9 @@ public class ImportActivity extends Activity {
+         Intent in = getIntent();
+         String simulate = in.getStringExtra("simulate");
+         if (simulate != null) {
+-            startForegroundService(new Intent(this, CasaService.class).setAction(CasaService.ACTION_SIMULATE)
+-                    .putExtra(CasaService.EXTRA_WHAT, simulate));
++            CasaService s = CasaService.running();
++            if (s != null) s.simulateNow(simulate);
++            else Toast.makeText(this, R.string.not_running, Toast.LENGTH_LONG).show();
+             finish();
+             return;
+         }
+@@ -36,7 +37,8 @@ public class ImportActivity extends Activity {
+             String session = in.getStringExtra("session_b64");
+             if (session != null) Devices.saveSession(this, CloudApi.Session.fromJson(decode(session)));
+             if (devices == null && session == null) throw new IllegalArgumentException("nothing to import");
+-            startForegroundService(new Intent(this, CasaService.class).setAction(CasaService.ACTION_RELOAD));
++            CasaService s = CasaService.running();
++            if (s != null) s.reload();   // otherwise it reads the new configuration when the launcher brings it up
+             Toast.makeText(this, session != null && devices == null ? getString(R.string.session_saved)
+                     : getString(R.string.imported, kept), Toast.LENGTH_LONG).show();
+         } catch (Exception e) {   // bad base64 or a configuration Devices refuses
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+index 392c5ca..464fe24 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+@@ -37,7 +37,7 @@ public class ToggleService extends Service {
+         Devices.Device d = role == null ? null : Devices.load(this, role);
+         if (d == null) return R.string.not_configured;
+         try (TuyaLocal t = TuyaLocal.connect(d)) {
+-            CasaService.reportSwitch(this, role, t.toggle());
++            CasaService.reportSwitch(role, t.toggle());
+             return 0;
+         } catch (IOException | RuntimeException e) {
+             return Devices.LUZ.equals(role) ? R.string.light_failed : R.string.heater_failed;
+diff --git a/addons/casa/app/src/main/res/values/strings.xml b/addons/casa/app/src/main/res/values/strings.xml
+index aac66c7..83df545 100644
+--- a/addons/casa/app/src/main/res/values/strings.xml
++++ b/addons/casa/app/src/main/res/values/strings.xml
+@@ -7,7 +7,7 @@
+     <string name="light_failed">No se pudo cambiar la luz: no responde en la red</string>
+     <string name="heater_failed">No se pudo cambiar el calefactor: no responde en la red</string>
+     <string name="session_saved">Casa: conectada con la nube</string>
+-    <string name="service_running">Vigilando la casa</string>
++    <string name="not_running">Casa no está en marcha: abre el inicio</string>
+     <string name="cloud_down">Casa: sin conexión con la nube de Tuya</string>
+     <string name="cloud_down_sub">Los avisos de la puerta y el clima no llegan</string>
+     <string name="gas_down">Casa: el sensor de gas no responde por la red</string>
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+index f12e8fe..bf78ed1 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+@@ -1,13 +1,16 @@
+ package com.gathin.tvhome;
+ 
+ import android.content.ComponentName;
++import android.content.Context;
+ import android.content.Intent;
++import android.content.ServiceConnection;
+ import android.content.res.ColorStateList;
+ import android.database.ContentObserver;
+ import android.database.Cursor;
+ import android.graphics.drawable.GradientDrawable;
+ import android.net.Uri;
+ import android.os.Handler;
++import android.os.IBinder;
+ import android.os.Looper;
+ import android.view.Gravity;
+ import android.view.View;
+@@ -53,11 +56,37 @@ final class CasaRow {
+     /** Adds the row when Casa is installed and answers; null otherwise, and the top bar stays as it was. */
+     static CasaRow attach(MainActivity activity, String pkg, LinearLayout bar, int leftBlockId) {
+         if (pkg.isEmpty() || activity.getPackageManager().resolveContentProvider(pkg + ".now", 0) == null) return null;
++        keepCasaUp(activity, pkg);
+         CasaRow row = new CasaRow(activity, pkg);
+         row.build(bar, leftBlockId);
+         return row;
+     }
+ 
++    private static boolean bound;
++
++    /**
++     * Binds Casa's service for as long as the launcher's process lives, which keeps its alerts running over any channel.
++     * TCL refuses to let Casa make itself a foreground service from the background, but a binding from Home is allowed.
++     */
++    private static void keepCasaUp(MainActivity activity, String pkg) {
++        if (bound) return;
++        try {
++            bound = activity.getApplicationContext().bindService(
++                    new Intent().setComponent(new ComponentName(pkg, pkg + ".CasaService")), new ServiceConnection() {
++                        @Override
++                        public void onServiceConnected(ComponentName name, IBinder service) {
++                        }
++
++                        @Override
++                        public void onServiceDisconnected(ComponentName name) {
++                            // Casa crashed or was updated: Android rebinds by itself while the binding stands.
++                        }
++                    }, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
++        } catch (RuntimeException refused) {
++            // An older Casa without the service, or without our permission: the row still reads what it can.
++        }
++    }
++
+     private void build(LinearLayout bar, int leftBlockId) {
+         RelativeLayout.LayoutParams blp = (RelativeLayout.LayoutParams) bar.getLayoutParams();
+         blp.removeRule(RelativeLayout.CENTER_VERTICAL);
+@@ -89,7 +118,7 @@ final class CasaRow {
+         humidity = value();
+         climate.addView(humidity);
+         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, px(42));
+-        clp.setMarginStart(px(14));
++        clp.setMarginStart(px(8));
+         row.addView(climate, clp);
+ 
+         RelativeLayout.LayoutParams rlp = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT,
+@@ -126,8 +155,8 @@ final class CasaRow {
+         ImageView i = new ImageView(activity);
+         i.setImageResource(res);
+         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(22), px(22));
+-        lp.setMarginEnd(px(6));
+-        lp.setMarginStart(px(4));
++        lp.setMarginEnd(px(4));
++        lp.setMarginStart(px(2));
+         i.setLayoutParams(lp);
+         return i;
+     }
+@@ -137,7 +166,8 @@ final class CasaRow {
+         t.setTextColor(0xFFFFFFFF);
+         t.setTextSize(15);
+         t.setText("—");
+-        t.setPaddingRelative(0, 0, px(6), 0);
++        t.setSingleLine(true);   // "60 %" wrapped into three lines when the row ran out of room
++        t.setPaddingRelative(0, 0, px(4), 0);
+         return t;
+     }
+ 
+-- 
+2.54.0.windows.1
+

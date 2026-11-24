@@ -1,0 +1,94 @@
+# Paquetes que tv-opt nunca toca, en ningún perfil: romperlos deja la TV sin imagen, mando, entradas,
+# teclado, sonido o DRM. Nombres verificados en TCL G05 (cleanyourtv «DO NOT DISABLE» + esta TV).
+# El teclado activo de cada tele no está aquí: lo protege el motor leyendo default_input_method (en casi todas las
+# teles es Gboard; en la TCL C845, el de TCL).
+
+# Android y servicios de Google
+android
+com.android.systemui
+com.android.settings
+com.android.tv.settings
+com.android.providers.settings
+com.android.providers.tv
+com.android.shell
+com.android.packageinstaller
+com.google.android.packageinstaller
+com.android.permissioncontroller
+com.google.android.permissioncontroller
+com.android.bluetooth
+com.android.inputdevices
+com.google.android.gms
+com.google.android.gsf
+com.android.vending
+com.google.android.webview
+com.google.android.tv.remote.service     # también lleva el botón del micro del mando
+
+# Sonido
+com.dolby.android.audio.service
+
+# TCL: TV en directo, HDMI, mando y sistema
+com.tcl.tv
+com.tcl.tvinput
+com.tcl.settings
+com.tcl.system.server
+com.tcl.providers.config
+com.tcl.initsetup
+com.tcl.factory.view
+com.tcl.autopair
+com.tcl.tcl_bt_rcu_service
+com.tcl.keyhelp
+com.tcl.inputmethod.international        # teclado activo en esta TV
+com.tcl.eva                              # RemoterService (ayudante de accesibilidad del mando)
+com.tcl.suspension                       # panel de fuentes del botón Input
+com.tcl.common.shortcutmenu              # HotKey: atajos del mando (Fase 4)
+
+# Fire OS (2026-11-23): lo que no se toca nunca, de data/fireos/never-disable.txt de dumbtv (MIT): el inicio, los
+# ajustes, las entradas HDMI, el mando, la TV en directo, la tienda, Prime Video (com.amazon.firebat), el webview y
+# com.amazon.vizzini (desactivado pinta una ventana imposible de cerrar sobre la tele).
+com.amazon.tv.launcher
+com.amazon.firehomestarter
+com.amazon.tv.settings.v2
+com.amazon.tv.settings.core
+com.amazon.tv.inputpreference.service
+com.amazon.tv.routing
+com.amazon.tv.devicecontrol
+com.amazon.tv.devicecontrolsettings
+com.amazon.tv.keypolicymanager
+com.amazon.tv.livetv
+com.amazon.franktvinput
+com.amazon.tifobserver
+com.mediatek.tis
+com.mediatek.dtv.tvinput.atsctuner
+com.amazon.mediatek.livetv
+com.amazon.tv.settings.mediatek
+com.droidlogic
+com.droidlogic.tvinput
+com.droidlogic.providers.tv
+com.amazon.tv.settings.amlogic
+com.amazon.tv.pqsettings
+com.vewd.core.fvpplayer
+com.vewd.core.opapp
+com.vewd.core.service
+com.vewd.core.tis
+com.vewd.core.tvapp
+com.amazon.tv.conditionalaccess
+com.amazon.tv.channelscan
+com.amazon.tv.arc
+com.amazon.android.tv.scan
+uk.co.freeview.signaidl
+com.android.networkstack.tethering.droidlogic
+com.android.networkstack.tethering.inprocess.droidlogic
+com.amazon.fireinputdevices
+com.amazon.autopairservice
+com.amazon.device.bluetoothpa
+com.amazon.device.blepa
+com.amazon.whisperjoin.middleware.np
+com.amazon.whisperplay.service.install
+com.amazon.storm.lightning.tutorial
+com.amazon.tv.oobe
+com.amazon.tv.ooberesource
+com.amazon.webview.chromium
+com.amazon.venezia
+com.amazon.firebat
+com.amazon.device.messaging
+com.amazon.vizzini

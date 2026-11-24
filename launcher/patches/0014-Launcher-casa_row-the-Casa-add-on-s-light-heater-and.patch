@@ -1,0 +1,423 @@
+From 68f35ceb1491c8c95da39abcc4b024fe9d0c4b00 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 11:11:59 +0100
+Subject: [PATCH 14/23] Launcher: casa_row, the Casa add-on's light, heater and
+ climate under the top bar
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ launcher/app/src/main/AndroidManifest.xml     |   2 +
+ .../main/java/com/gathin/tvhome/CasaRow.java  | 201 ++++++++++++++++++
+ .../main/java/com/gathin/tvhome/Config.java   |   9 +-
+ .../java/com/gathin/tvhome/MainActivity.java  |   5 +
+ .../src/main/res/drawable/ic_casa_bulb.xml    |   7 +
+ .../src/main/res/drawable/ic_casa_drop.xml    |   7 +
+ .../src/main/res/drawable/ic_casa_heat.xml    |   7 +
+ .../src/main/res/drawable/ic_casa_thermo.xml  |   7 +
+ .../app/src/main/res/values-es/strings.xml    |   2 +
+ launcher/app/src/main/res/values/config.xml   |   4 +
+ launcher/app/src/main/res/values/strings.xml  |   2 +
+ 11 files changed, 251 insertions(+), 2 deletions(-)
+ create mode 100644 launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+ create mode 100644 launcher/app/src/main/res/drawable/ic_casa_bulb.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_casa_drop.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_casa_heat.xml
+ create mode 100644 launcher/app/src/main/res/drawable/ic_casa_thermo.xml
+
+diff --git a/launcher/app/src/main/AndroidManifest.xml b/launcher/app/src/main/AndroidManifest.xml
+index ecd450e..c5a6c96 100644
+--- a/launcher/app/src/main/AndroidManifest.xml
++++ b/launcher/app/src/main/AndroidManifest.xml
+@@ -71,6 +71,8 @@
+         <!-- Coocaa OS sources for the Inputs menu (coocaa_sources); see CoocaaSources. -->
+         <provider android:authorities="com.skyworth.tv.provider" />
+         <provider android:authorities="com.skyworth.tv.sdk.provider" />
++        <!-- casa_row: the Casa add-on's state, which has no launcher entry to make it visible otherwise. -->
++        <provider android:authorities="io.github.ignaciopd3.casa.now" />
+     </queries>
+ 
+     <application
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+new file mode 100644
+index 0000000..f12e8fe
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+@@ -0,0 +1,201 @@
++package com.gathin.tvhome;
++
++import android.content.ComponentName;
++import android.content.Intent;
++import android.content.res.ColorStateList;
++import android.database.ContentObserver;
++import android.database.Cursor;
++import android.graphics.drawable.GradientDrawable;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.Looper;
++import android.view.Gravity;
++import android.view.View;
++import android.widget.ImageView;
++import android.widget.LinearLayout;
++import android.widget.RelativeLayout;
++import android.widget.TextView;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * casa_row: a second row under the top-bar capsule, inside the same dark glass, for the Casa add-on (tv-opt): the
++ * living-room light and the heater (OK switches them; the icon turns amber or orange while on) and the room's
++ * temperature and humidity, read from Casa's provider and kept current with a ContentObserver. The top bar moves up
++ * to the header capsule's top so both rows fit in the header's height and nothing below moves.
++ */
++final class CasaRow {
++    private static final int AMBER = 0xFFFFC44D, ORANGE = 0xFFFF8A4C, INK = 0xFF111111;
++
++    private final MainActivity activity;
++    private final String pkg;
++    private final Uri now;
++    private final float density;
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final ExecutorService io = Executors.newSingleThreadExecutor();
++    private TextView light, heater, temperature, humidity;
++    private final ContentObserver observer;
++    private boolean watching;
++
++    private CasaRow(MainActivity activity, String pkg) {
++        this.activity = activity;
++        this.pkg = pkg;
++        this.now = Uri.parse("content://" + pkg + ".now/now");
++        this.density = activity.getResources().getDisplayMetrics().density;
++        this.observer = new ContentObserver(main) {
++            @Override
++            public void onChange(boolean selfChange) {
++                refresh();
++            }
++        };
++    }
++
++    /** Adds the row when Casa is installed and answers; null otherwise, and the top bar stays as it was. */
++    static CasaRow attach(MainActivity activity, String pkg, LinearLayout bar, int leftBlockId) {
++        if (pkg.isEmpty() || activity.getPackageManager().resolveContentProvider(pkg + ".now", 0) == null) return null;
++        CasaRow row = new CasaRow(activity, pkg);
++        row.build(bar, leftBlockId);
++        return row;
++    }
++
++    private void build(LinearLayout bar, int leftBlockId) {
++        RelativeLayout.LayoutParams blp = (RelativeLayout.LayoutParams) bar.getLayoutParams();
++        blp.removeRule(RelativeLayout.CENTER_VERTICAL);
++        blp.addRule(RelativeLayout.ALIGN_TOP, leftBlockId);
++        bar.setLayoutParams(blp);
++        bar.setBackground(glass(true));
++
++        LinearLayout row = new LinearLayout(activity);
++        row.setId(View.generateViewId());
++        row.setOrientation(LinearLayout.HORIZONTAL);
++        row.setGravity(Gravity.CENTER_VERTICAL);
++        row.setBackground(glass(false));
++        row.setPaddingRelative(bar.getPaddingStart(), bar.getPaddingTop(), bar.getPaddingEnd(), bar.getPaddingBottom());
++        row.setClipToPadding(false);
++        row.setClipChildren(false);
++
++        light = button(R.drawable.ic_casa_bulb, R.string.casa_light, "LuzActivity", bar);
++        heater = button(R.drawable.ic_casa_heat, R.string.casa_heater, "CalefactorActivity", bar);
++        row.addView(light);
++        row.addView(heater);
++        LinearLayout climate = new LinearLayout(activity);
++        climate.setOrientation(LinearLayout.HORIZONTAL);
++        climate.setGravity(Gravity.CENTER_VERTICAL);
++        climate.setFocusable(false);
++        climate.addView(icon(R.drawable.ic_casa_thermo));
++        temperature = value();
++        climate.addView(temperature);
++        climate.addView(icon(R.drawable.ic_casa_drop));
++        humidity = value();
++        climate.addView(humidity);
++        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, px(42));
++        clp.setMarginStart(px(14));
++        row.addView(climate, clp);
++
++        RelativeLayout.LayoutParams rlp = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT,
++                RelativeLayout.LayoutParams.WRAP_CONTENT);
++        rlp.addRule(RelativeLayout.BELOW, bar.getId());
++        rlp.addRule(RelativeLayout.ALIGN_START, bar.getId());
++        rlp.addRule(RelativeLayout.ALIGN_END, bar.getId());
++        ((RelativeLayout) bar.getParent()).addView(row, rlp);
++    }
++
++    /** An icon-only top button, the same style and size as the ones above it. */
++    private TextView button(int icon, int label, String activityName, LinearLayout bar) {
++        TextView b = new TextView(activity, null, 0, R.style.TopButton);
++        b.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
++        b.setContentDescription(activity.getString(label));
++        b.setPaddingRelative(px(10), 0, px(10), 0);
++        b.setCompoundDrawablePadding(0);
++        if (bar.getChildCount() > 0) b.setBackground(bar.getChildAt(0).getBackground().getConstantState().newDrawable());
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(42), px(42));
++        lp.setMarginStart(px(4));
++        b.setLayoutParams(lp);
++        b.setOnClickListener(v -> {
++            try {
++                activity.startActivity(new Intent().setComponent(new ComponentName(pkg, pkg + "." + activityName)));
++            } catch (RuntimeException gone) {
++                // Casa was removed or refused: nothing to switch.
++            }
++        });
++        tint(b, null, AMBER);
++        return b;
++    }
++
++    private ImageView icon(int res) {
++        ImageView i = new ImageView(activity);
++        i.setImageResource(res);
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(22), px(22));
++        lp.setMarginEnd(px(6));
++        lp.setMarginStart(px(4));
++        i.setLayoutParams(lp);
++        return i;
++    }
++
++    private TextView value() {
++        TextView t = new TextView(activity);
++        t.setTextColor(0xFFFFFFFF);
++        t.setTextSize(15);
++        t.setText("—");
++        t.setPaddingRelative(0, 0, px(6), 0);
++        return t;
++    }
++
++    /** Ink while focused (the button turns white), the colour while on, white while off or unknown. */
++    private static void tint(TextView b, Boolean on, int color) {
++        int rest = Boolean.TRUE.equals(on) ? color : 0xFFFFFFFF;
++        b.setCompoundDrawableTintList(new ColorStateList(new int[][] {{android.R.attr.state_focused}, {}}, new int[] {INK, rest}));
++    }
++
++    /** The top piece keeps its upper corners round, the row its lower ones, so the two read as one block. */
++    private GradientDrawable glass(boolean top) {
++        GradientDrawable g = new GradientDrawable();
++        g.setColor(0x8C080A10);
++        float r = 27 * density;
++        g.setCornerRadii(top ? new float[] {r, r, r, r, 0, 0, 0, 0} : new float[] {0, 0, 0, 0, r, r, r, r});
++        g.setStroke(Math.max(1, Math.round(density)), 0x24FFFFFF);
++        return g;
++    }
++
++    void start() {
++        if (!watching) {
++            activity.getContentResolver().registerContentObserver(now, false, observer);
++            watching = true;
++        }
++        refresh();
++    }
++
++    void stop() {
++        if (watching) activity.getContentResolver().unregisterContentObserver(observer);
++        watching = false;
++    }
++
++    private void refresh() {
++        io.execute(() -> {
++            Integer l = null, h = null;
++            String t = "—", hu = "—";
++            try (Cursor c = activity.getContentResolver().query(now, null, null, null, null)) {
++                if (c != null && c.moveToFirst()) {
++                    l = c.getInt(c.getColumnIndexOrThrow("luz"));
++                    h = c.getInt(c.getColumnIndexOrThrow("calefactor"));
++                    t = c.getString(c.getColumnIndexOrThrow("temperature"));
++                    hu = c.getString(c.getColumnIndexOrThrow("humidity"));
++                }
++            } catch (RuntimeException unavailable) {
++                // Casa is busy starting or gone: keep the dashes.
++            }
++            Integer fl = l, fh = h;
++            String ft = t, fhu = hu;
++            main.post(() -> {
++                tint(light, fl == null || fl < 0 ? null : fl == 1, AMBER);
++                tint(heater, fh == null || fh < 0 ? null : fh == 1, ORANGE);
++                temperature.setText(ft);
++                humidity.setText(fhu);
++            });
++        });
++    }
++
++    private int px(float dp) {
++        return Math.round(dp * density);
++    }
++}
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index 58adce1..a9d9c80 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -148,6 +148,8 @@ final class Config {
+     final boolean headerCapsule;
+     /** top_bar_capsule: the top buttons inside one dark glass capsule; each fills white only while focused. */
+     final boolean topBarCapsule;
++    /** casa_row: the Casa add-on's package; its light, heater and climate go in a second row under the top bar. */
++    final String casaRow;
+     /** App library as a round button in the top bar (config.xml library_button); needs app_library. */
+     final boolean libraryButton;
+     /** The App library pill after the last Home row; false hides it while libraryButton is on (show_library_pill). */
+@@ -310,7 +312,8 @@ final class Config {
+                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean volumePausesFilter, boolean homeIgnoreChannelKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
+                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+                    boolean settingsKeyClearTask, String weatherApp, boolean adbWarning,
+-                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp) {
++                   boolean headerCapsule, boolean topBarCapsule, String vpnAppPerApp, String casaRow) {
++        this.casaRow = casaRow;
+         this.weatherApp = weatherApp;
+         this.vpnAppPerApp = vpnAppPerApp;
+         this.adbWarning = adbWarning;
+@@ -516,6 +519,7 @@ final class Config {
+         boolean tileMenu = res.getBoolean(R.bool.tile_menu);
+         String vpn = res.getString(R.string.vpn_app).trim();
+         String vpnPerApp = res.getString(R.string.vpn_app_per_app).trim();
++        String casaRow = res.getString(R.string.casa_row).trim();
+         boolean homeSettings = res.getBoolean(R.bool.show_home_settings_shortcut);
+         boolean showStats = res.getBoolean(R.bool.show_stats);
+         String gameDay = res.getString(R.string.game_day).trim();
+@@ -638,6 +642,7 @@ final class Config {
+             tileMenu = bool(json, "tile_menu", tileMenu);
+             vpn = string(json, "vpn_app", vpn);
+             vpnPerApp = string(json, "vpn_app_per_app", vpnPerApp);
++            casaRow = string(json, "casa_row", casaRow);
+             homeSettings = bool(json, "show_home_settings_shortcut", homeSettings);
+             showStats = bool(json, "show_stats", showStats);
+             gameDay = string(json, "game_day", gameDay);
+@@ -758,7 +763,7 @@ final class Config {
+                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
+                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
+                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+-                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp);
++                settingsKeyClearTask, weatherApp, adbWarning, headerCapsule, topBarCapsule, vpnPerApp, casaRow);
+     }
+ 
+     /**
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index 1fcc1aa..bbdb4ba 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -909,6 +909,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         }
+         if (cfg.iconOnlyInputs) makeIconOnly((TextView) btnInputs);
+         applyHeaderCapsules(cfg);
++        casaRow = cfg.topBarCapsule ? CasaRow.attach(this, cfg.casaRow, findViewById(R.id.topButtons), R.id.leftBlock) : null;
+         iconOnlyVpn = vpnPill && cfg.iconOnlyVpn;
+         if (iconOnlyVpn) {
+             vpnPlainBackground = btnVpn.getBackground().getConstantState();
+@@ -1163,6 +1164,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         if (showStats) startStats();
+         if (gameDay != null) gameDay.start();
+         if (weather != null) weather.start();
++        if (casaRow != null) casaRow.start();
+         startAdbWarning();
+         sky.update();
+         wallpaperPlayer.start();
+@@ -1350,6 +1352,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         stopStats();
+         if (gameDay != null) gameDay.stop();
+         if (weather != null) weather.stop();
++        if (casaRow != null) casaRow.stop();
+         stopAdbWarning();
+         handler.removeCallbacks(turnTick);
+         if (lamp != null) lamp.stop();
+@@ -3157,6 +3160,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+ 
+     /** config.xml icon_only_buttons. */
+     private boolean iconOnlyButtons;
++    /** casa_row: the Casa add-on's row under the top bar, or null. */
++    private CasaRow casaRow;
+     /** config.xml top_menu: Inputs, Wi-Fi and Settings folded into one gear. */
+     private boolean topMenu;
+     /** show_inputs_pill as configured: top_menu clears showInputsPill, so its Inputs row reads this. */
+diff --git a/launcher/app/src/main/res/drawable/ic_casa_bulb.xml b/launcher/app/src/main/res/drawable/ic_casa_bulb.xml
+new file mode 100644
+index 0000000..8a1738e
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_casa_bulb.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- casa_row: the living-room light, a 1.5 stroke like the top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M9,17.5h6M10,20.5h4M12,3.5a5.5,5.5 0,0 0,-3.2,10c0.5,0.4 0.8,1 0.8,1.6v0.4h4.8v-0.4c0,-0.6 0.3,-1.2 0.8,-1.6A5.5,5.5 0,0 0,12,3.5z" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_casa_drop.xml b/launcher/app/src/main/res/drawable/ic_casa_drop.xml
+new file mode 100644
+index 0000000..35e7eec
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_casa_drop.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- casa_row: the room humidity, a 1.5 stroke like the top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M12,3.8c3,3.9 5.5,7 5.5,10a5.5,5.5 0,0 1,-11 0c0,-3 2.5,-6.1 5.5,-10z" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_casa_heat.xml b/launcher/app/src/main/res/drawable/ic_casa_heat.xml
+new file mode 100644
+index 0000000..00516a9
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_casa_heat.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- casa_row: the heater, a 1.5 stroke like the top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M7.5,19.5c-1.8,-2.5 1.8,-4.5 0,-7.5s1.8,-4.5 0,-7.5M12,19.5c-1.8,-2.5 1.8,-4.5 0,-7.5s1.8,-4.5 0,-7.5M16.5,19.5c-1.8,-2.5 1.8,-4.5 0,-7.5s1.8,-4.5 0,-7.5" />
++</vector>
+diff --git a/launcher/app/src/main/res/drawable/ic_casa_thermo.xml b/launcher/app/src/main/res/drawable/ic_casa_thermo.xml
+new file mode 100644
+index 0000000..99dcff5
+--- /dev/null
++++ b/launcher/app/src/main/res/drawable/ic_casa_thermo.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- casa_row: the room temperature, a 1.5 stroke like the top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M10,13.6V5.5a2,2 0,0 1,4 0v8.1a4,4 0,1 1,-4 0zM12,10v5.5" />
++</vector>
+diff --git a/launcher/app/src/main/res/values-es/strings.xml b/launcher/app/src/main/res/values-es/strings.xml
+index 753e0a3..889b678 100644
+--- a/launcher/app/src/main/res/values-es/strings.xml
++++ b/launcher/app/src/main/res/values-es/strings.xml
+@@ -150,4 +150,6 @@
+     <string name="clock_format_system">Sistema</string>
+     <string name="clock_format_12">12 horas</string>
+     <string name="clock_format_24">24 horas</string>
++    <string name="casa_light">Luz</string>
++    <string name="casa_heater">Calefactor</string>
+ </resources>
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 5d53598..4b6d2b8 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -303,6 +303,10 @@
+          streaming app's built-in one that only carries that app (Android does not tell Home whose VPN it is, only
+          whether it covers Home). Empty: always vpn_app. -->
+     <string name="vpn_app_per_app" translatable="false"></string>
++    <!-- The Casa add-on's package (io.github.ignaciopd3.casa): with top_bar_capsule on, a second row under the top bar,
++         in the same dark glass, holds the living-room light and the heater (OK switches them; amber or orange while
++         on) and the room's temperature and humidity. Empty, or Casa not installed: no row. -->
++    <string name="casa_row" translatable="false"></string>
+     <!-- The VPN as its own pill after the network pill, instead of a badge inside it: solid green with a lock while a
+          VPN is up, solid red "VPN off" while none is and vpn_app is installed. Pressing it opens vpn_app (without it,
+          the App library, or VPN settings when app_library is off), and the network pill then always opens Wi-Fi
+diff --git a/launcher/app/src/main/res/values/strings.xml b/launcher/app/src/main/res/values/strings.xml
+index 61d052b..2664b23 100644
+--- a/launcher/app/src/main/res/values/strings.xml
++++ b/launcher/app/src/main/res/values/strings.xml
+@@ -159,4 +159,6 @@
+     <string name="clock_format_system">System</string>
+     <string name="clock_format_12">12-hour</string>
+     <string name="clock_format_24">24-hour</string>
++    <string name="casa_light">Light</string>
++    <string name="casa_heater">Heater</string>
+ </resources>
+-- 
+2.54.0.windows.1
+

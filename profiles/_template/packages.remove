@@ -1,0 +1,8 @@
+# Nivel seguro: bloatware, telemetría y anuncios (se aplica con --action debloat).
+# Formato: paquete [disable|uninstall]   # motivo
+#   disable   (por defecto) pm disable-user --user 0: reversible y lo más conservador.
+#   uninstall pm uninstall -k --user 0: también reversible (cmd package install-existing).
+# Criterio: solo lo deshabilitado sin incidencias en televisores con la misma placa/firmware y ajeno a
+# imagen, sonido, mando, HDMI, DRM y actualizaciones. Lo demás va a packages.caution.
+# Fuente de partida: backups/<run>/before/packages.installed y audit/packages.paths tras --action audit.
+# lib/protected.list bloquea los paquetes imprescindibles aunque aparezcan aquí.

@@ -1,0 +1,145 @@
+From 90307da2d7e8c62a7ca1b1e9059d854f970cc8db Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 21:25:44 +0100
+Subject: [PATCH 19/23] GuardRevival puts the helpers back with
+ restore_key_services; stock_home_redirect checks the front on connect
+
+On Fire OS Home is Amazon's, so after a force stop nothing started this launcher
+again: Android had taken HomeKeyService off the accessibility list and the stock
+home, ads and all, stayed until the helper was turned on over ADB (Fire TV Stick
+4K Max, Fire OS 7.7.1.3). GuardRevival, which Android binds again after a force
+stop, now also runs ServiceRepair.restore when restore_key_services is on.
+
+The helper can come back while the stock home is already in front. No window
+event comes for it, and Fire OS keeps both Home broadcasts to itself, so Home
+pressed there did nothing. On connect, HomeKeyService now reads the last activity
+moved to the front (UsageStats, GET_USAGE_STATS allowed by the installer) and
+redirects when it is the stock home.
+---
+ launcher/app/src/main/AndroidManifest.xml     |  4 ++
+ .../java/com/gathin/tvhome/GuardRevival.java  | 12 +++++-
+ .../com/gathin/tvhome/HomeKeyService.java     | 40 ++++++++++++++++++-
+ 3 files changed, 52 insertions(+), 4 deletions(-)
+
+diff --git a/launcher/app/src/main/AndroidManifest.xml b/launcher/app/src/main/AndroidManifest.xml
+index c5a6c96..d64b47e 100644
+--- a/launcher/app/src/main/AndroidManifest.xml
++++ b/launcher/app/src/main/AndroidManifest.xml
+@@ -18,6 +18,10 @@
+          list (ServiceRepair). Granted with pm grant by build-and-install when a helper is enabled. -->
+     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+         tools:ignore="ProtectedPermissions" />
++    <!-- stock_home_redirect (Fire OS): which activity is in front when HomeKeyService connects, so it can leave a
++         stock home that was already up. The installer allows it with appops set GET_USAGE_STATS allow. -->
++    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
++        tools:ignore="ProtectedPermissions" />
+     <!-- YaOS (Yandex TV OS): HDMI, AV and the tuner all play in com.yandex.tv.live, whose activities require
+          this permission (protection level normal, so it is granted at install). Ignored on other TVs. -->
+     <uses-permission android:name="yandex.tv.permission.ACCESS_TV_SOURCE" />
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/GuardRevival.java b/launcher/app/src/main/java/com/gathin/tvhome/GuardRevival.java
+index e807976..e6667d4 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/GuardRevival.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/GuardRevival.java
+@@ -26,17 +26,25 @@ public class GuardRevival extends NotificationListenerService {
+                 @Override
+                 public void onReceive(Context context, Intent intent) {
+                     stopWaiting();
+-                    GuardKeep.ensureHomeKey(GuardRevival.this);
++                    revive();
+                 }
+             };
+             registerReceiver(unlocked, new IntentFilter(Intent.ACTION_USER_UNLOCKED));
+             if (users.isUserUnlocked()) {
+                 stopWaiting();
+-                GuardKeep.ensureHomeKey(this);
++                revive();
+             }
+             return;
+         }
++        revive();
++    }
++
++    /** The standby opt-in, and with restore_key_services the helpers a force stop took off the list. Where Home
++     *  is another app's (stock_home_redirect on Fire OS) nothing else starts this launcher after a force stop: the
++     *  stock home stayed, ads and all, until the helper was turned on again over ADB (Fire TV Stick 4K Max). */
++    private void revive() {
+         GuardKeep.ensureHomeKey(this);
++        if (Config.load(this).restoreKeyServices) ServiceRepair.restore(this);
+     }
+ 
+     private void stopWaiting() {
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+index 74e910e..4195a33 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/HomeKeyService.java
+@@ -5,6 +5,8 @@ import android.accessibilityservice.AccessibilityServiceInfo;
+ import android.app.ActivityOptions;
+ import android.app.AlarmManager;
+ import android.app.PendingIntent;
++import android.app.usage.UsageEvents;
++import android.app.usage.UsageStatsManager;
+ import android.content.ActivityNotFoundException;
+ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
+@@ -85,6 +87,8 @@ public class HomeKeyService extends AccessibilityService {
+     private boolean onStockHome;
+     private BroadcastReceiver stockScreenOn;
+     static final long COVER_MAX_MS = 1500;
++    /** How far back the front check looks: the last activity moved to the front is the one still there. */
++    private static final long FRONT_LOOKBACK_MS = 6 * 60 * 60 * 1000L;
+     /** power_on_home: the Live TV package to send back to Home, empty when off; armed until this uptime or a key. */
+     private String powerOnLiveTv = "";
+     private long powerOnUntil;
+@@ -223,8 +227,12 @@ public class HomeKeyService extends AccessibilityService {
+                 stockHome.add(ri.activityInfo.name);
+             }
+         }
+-        if (!stockHome.isEmpty()) armStockHome(config.backgroundColor);
+-        else disarmStockHome();
++        if (!stockHome.isEmpty()) {
++            armStockHome(config.backgroundColor);
++            redirectIfStockHomeInFront();
++        } else {
++            disarmStockHome();
++        }
+         // power_on_home, off by default. Not with boot_to_live_tv, or with Live TV picked as the Open on start app:
+         // those open Live TV on purpose at boot.
+         String openOnStart = config.openOnStartChoice
+@@ -430,6 +438,34 @@ public class HomeKeyService extends AccessibilityService {
+         }
+     }
+ 
++    /** Connected while the stock home is already in front (ServiceRepair after a force stop, a late bind at boot):
++     *  no window event comes for it, and Home pressed there changes no window either. Fire OS keeps both Home
++     *  broadcasts to itself (CLOSE_SYSTEM_DIALOGS needs com.amazon.permission.ENABLE_KEYGUARD_FLAGS, and
++     *  com.amazon.tv.devicecontrol.HOME_PRESSED goes only to Amazon's receiver), so the stock home stayed until an
++     *  app was opened and closed. The last activity moved to the front says which screen it is: a package check
++     *  would not do, Amazon's Settings live in the same package as its home. Needs GET_USAGE_STATS (appops allow,
++     *  set by the installer); without it the query comes back empty and nothing happens. dumbtv's Keeper reads the
++     *  front activity the same way (github.com/humblemuzzu/dumbtv, MIT). */
++    private void redirectIfStockHomeInFront() {
++        try {
++            UsageStatsManager usage = getSystemService(UsageStatsManager.class);
++            if (usage == null) return;
++            long now = System.currentTimeMillis();
++            UsageEvents events = usage.queryEvents(now - FRONT_LOOKBACK_MS, now);
++            UsageEvents.Event event = new UsageEvents.Event();
++            String front = null;
++            while (events.hasNextEvent()) {
++                events.getNextEvent(event);
++                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) front = event.getClassName();
++            }
++            if (front == null || !stockHome.contains(front)) return;
++        } catch (RuntimeException unreadable) {
++            return;  // a firmware that refuses the query: the window events still redirect
++        }
++        onStockHome = true;
++        redirectStockHome();
++    }
++
+     private void disarmStockHome() {
+         handler.removeCallbacks(uncover);
+         if (cover != null) {
+-- 
+2.54.0.windows.1
+

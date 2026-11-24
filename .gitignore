@@ -1,0 +1,14 @@
+# Backups de cada TV: contienen android_id y otros datos del dispositivo
+profiles/*/backups/
+
+# Cachés de Python de tools/
+__pycache__/
+
+# Capturas locales del navegador de pruebas
+.playwright-mcp/
+graphify-out/
+
+# Entorno y cachés de Python (uv, pytest, ruff)
+.venv/
+.pytest_cache/
+.ruff_cache/
