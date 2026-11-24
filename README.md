@@ -54,8 +54,32 @@ Tuned TV switches it off with the TV's own developer tools, one reviewed step at
   do what you want. On Fire TV it even takes over the Home button, which Fire OS normally keeps to itself.
 - **Terrestrial channels in order.** Tune and sort channels your way, with each channel's best version on its number:
   UHD if your TV supports it, HD if not. You decide. [How](docs/guides/channels.md).
+- **Your home on the TV** (optional): door and gas alerts over whatever you watch, and light and heater on a button,
+  with Smart Life / Tuya. [See below](#your-home-on-the-tv).
 - **Per-model profiles.** Each TV model gets a folder with its lists, settings and notes, so the next person with that
   model starts from a tested setup. [Add yours](CONTRIBUTING.md).
+
+## Your home on the TV
+
+<p align="center">
+  <img src="docs/images/casa.en.jpg" width="100%" alt="Smart home on the TV: door open, still open and closed alerts; gas alarm over a darkened screen; light and heater buttons; home temperature and humidity">
+</p>
+
+With the **Casa** add-on and Smart Life / Tuya devices, the TV alerts you about the door and the gas over whatever you
+are watching, and switches the light or the heater from the home screen or a remote button. Step by step in the
+[smart home guide](docs/guides/home-automation.md). Home Assistant support is on the way.
+
+<sub>The door alerts are drawn with the add-on's colours and sizes; the gas alarm, the panel and the clock are crops of
+real screenshots (CC BY-SA wallpapers, see [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+
+## Remote buttons
+
+<p align="center">
+  <img src="docs/images/botones.en.png" width="100%" alt="Remote buttons: on the TCL, Netflix, YouTube and Prime Video open their app, TCL Home and Web go to HDMI 1 and 2, the TCL button opens the app you choose and yellow switches the light; on the Fire TV, Home goes to the clean home screen, TV opens the app you choose and the phone works as a spare remote">
+</p>
+
+They are set in each profile's `launcher/config.json` (`app_keys` and `redirect_apps`) and, where the firmware reads
+them from settings, in `remap.conf`. Each profile's README lists which buttons can be changed on that model.
 
 ## Supported systems
 

@@ -53,8 +53,32 @@ Tuned TV lo apaga con las herramientas de desarrollo de la propia tele, paso a p
   hacen lo que quieres. En Fire TV se queda incluso con el botón de inicio, que Fire OS normalmente se reserva.
 - **Canales de la TDT en orden.** Sintoniza y ordena los canales a tu gusto, con la mejor versión de cada uno en su
   número: la UHD si tu tele la admite, la HD si no. Tú decides. [Cómo](docs/guides/channels.es.md).
+- **Tu casa en la tele** (opcional): avisos de puerta y gas encima de lo que veas, y luz y calefactor a un botón, con
+  Smart Life / Tuya. [Ver abajo](#tu-casa-en-la-tele).
 - **Perfiles por modelo.** Cada modelo de tele tiene su carpeta con sus listas, ajustes y notas, para que el siguiente
   con ese modelo empiece desde algo probado. [Añade el tuyo](CONTRIBUTING.es.md).
+
+## Tu casa en la tele
+
+<p align="center">
+  <img src="docs/images/casa.es.jpg" width="100%" alt="Domótica en la tele: avisos de puerta abierta, sigue abierta y cerrada; alarma de gas a pantalla oscura; botones de luz y calefactor; temperatura y humedad de casa">
+</p>
+
+Con el complemento **Casa** y aparatos de Smart Life / Tuya, la tele avisa de la puerta y del gas encima de lo que estés
+viendo, y enciende la luz o el calefactor desde el inicio o con un botón del mando. Paso a paso, en la
+[guía de domótica](docs/guides/home-automation.es.md). Home Assistant, en camino.
+
+<sub>Los avisos de la puerta están dibujados con los colores y medidas del complemento; el gas, el panel y el reloj son
+recortes de capturas reales (fondos CC BY-SA, ver [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+
+## Los botones del mando
+
+<p align="center">
+  <img src="docs/images/botones.es.png" width="100%" alt="Botones del mando: en la TCL, Netflix, YouTube y Prime Video abren su app, TCL Home y Web van a HDMI 1 y 2, el botón TCL abre la app que elijas y el amarillo enciende la luz; en el Fire TV, Inicio lleva al inicio limpio, TV abre la app que elijas y el móvil sirve de mando de recambio">
+</p>
+
+Se eligen en el `launcher/config.json` de cada perfil (`app_keys` y `redirect_apps`) y, donde el firmware los lee de
+los ajustes, en `remap.conf`. El README de cada perfil dice qué botones se pueden cambiar en ese modelo.
 
 ## Sistemas
 

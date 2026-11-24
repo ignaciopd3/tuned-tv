@@ -49,7 +49,9 @@ pictures stay under CC BY-SA, and so do the README screenshots in [`docs/images/
 
 - [tuya-device-sharing-sdk](https://github.com/tuya/tuya-device-sharing-sdk) and
   [tinytuya](https://github.com/jasonacox/tinytuya) (both MIT) are used by the optional Casa tools in `tools/`, which
-  you install yourself.
+  you install yourself. `tools/casa_probe.py` signs in through Tuya's device sharing with
+  [Home Assistant](https://github.com/home-assistant/core)'s public client registration (Apache 2.0), the same QR
+  flow as Home Assistant's Tuya integration.
 - [Control D](https://controld.com)'s free public resolver `p2.freedns.controld.com` is the private DNS the example
   profiles set; any DNS-over-TLS resolver works.
 
