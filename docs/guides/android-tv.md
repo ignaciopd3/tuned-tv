@@ -63,9 +63,9 @@ property, such as `persist.tcl.client_type` on TCL.
 
 ## What Tuned TV does on Android TV
 
-- **The engine** (`run.py motor`): it disables packages, applies settings, app permissions (`appops`) and log levels,
+- **The engine** (`run.py engine`): it disables packages, applies settings, app permissions (`appops`) and log levels,
   and remaps buttons where the firmware allows it. It takes a snapshot first and lets you roll back every run.
-- **Measuring** (`run.py medir`): CPU, memory, swap and the busiest processes, at idle.
+- **Measuring** (`run.py measure`): CPU, memory, swap and the busiest processes, at idle.
 - **The launcher** (`run.py launcher`): replaces the home screen, including Google TV's, and its suggestions. It adds a
   clock, weather and remote-button actions, and installs add-ons.
 

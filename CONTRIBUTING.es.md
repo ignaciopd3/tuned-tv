@@ -142,6 +142,9 @@ completo; cualquier otro idioma sale en inglés hasta que alguien lo traduzca.
   commit en un clon de cleanyourtv y exporta el parche. Las pruebas de Casa comprueban que cada idioma tiene todos
   los textos con los mismos huecos.
 - Las traducciones no cuestan nada al usar la tele: Android elige el idioma una vez, al abrir la app.
+- **La herramienta del ordenador** escribe sus mensajes en español dentro de `tr()` y guarda el inglés en
+  `tvopt/core/i18n_en.py`. Un mensaje nuevo necesita su línea en inglés; `tests/test_i18n.py` falla si falta, y también
+  si un mensaje se enseña sin `tr()`. Habla el idioma del sistema, o el de `TVOPT_LANG` (`en`, `es`).
 
 ## Revisión
 

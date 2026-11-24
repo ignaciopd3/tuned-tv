@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from tvopt.adb.client import Adb, AdbError
+from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 
 LAUNCHER = "com.gathin.tvhome"
@@ -66,7 +67,7 @@ def wait_home(
 
     homes: el nuestro y, donde el sistema no deja cambiar el inicio (Fire OS), el de serie que se redirige."""
     while not home_front(adb, homes):
-        log.info("Esperando a que el inicio esté delante para no interrumpir lo que se está viendo…")
+        log.info(tr("Esperando a que el inicio esté delante para no interrumpir lo que se está viendo…"))
         sleep(15)
 
 
@@ -83,19 +84,23 @@ def install(
     installed = {} if force else parse_hashes(adb.batch(hash_sections(packages)), packages)
     pending = to_install(wanted, installed) if not force else packages
     if not pending:
-        log.ok("La tele ya tiene estos mismos APK: no se instala nada")
+        log.ok(tr("La tele ya tiene estos mismos APK: no se instala nada"))
         return []
     wait_home(adb, log, homes)
     for pkg in sorted(pending, key=lambda p: p == LAUNCHER):  # el launcher, el último
         ok, said = adb.install(wanted[pkg])
         if not ok:
-            hint = " (¿firmado con otra clave?)" if pkg == LAUNCHER else ""
-            raise Fail(1, f"Falló la instalación de {pkg}{hint}: {said}")
+            hint = tr(" (¿firmado con otra clave?)") if pkg == LAUNCHER else ""
+            raise Fail(1, tr("Falló la instalación de {pkg}{hint}: {said}", pkg=pkg, hint=hint, said=said))
         # APP_AUTO_START es de TCL/MediaTek; Fire OS no lo conoce y no hace falta.
         allowed = pkg in auto_start and "permitido" in adb.shell(
             f"cmd appops set {pkg} APP_AUTO_START allow >/dev/null 2>&1 && echo permitido || echo no"
         )
-        log.ok(f"Instalado {pkg}" + (" con arranque automático permitido" if allowed else ""))
+        log.ok(
+            tr("Instalado {pkg} con arranque automático permitido", pkg=pkg)
+            if allowed
+            else tr("Instalado {pkg}", pkg=pkg)
+        )
         if pkg == LAUNCHER:
             keep_home_front(adb, _HOME if homes == (LAUNCHER,) else _OURS)
     return pending
@@ -112,8 +117,10 @@ def keep_alive(adb: Adb, log: Log) -> None:
         f" && cmd notification allow_listener {LAUNCHER}/.GuardRevival && echo listo || echo no"
     )
     if "listo" not in out:
-        raise Fail(1, "No se pudo dar al launcher los permisos de ajustes e historial de uso ni activar GuardRevival")
-    log.ok("El launcher vuelve solo tras un cierre forzado (GuardRevival, permisos de ajustes e historial de uso)")
+        raise Fail(
+            1, tr("No se pudo dar al launcher los permisos de ajustes e historial de uso ni activar GuardRevival")
+        )
+    log.ok(tr("El launcher vuelve solo tras un cierre forzado (GuardRevival, permisos de ajustes e historial de uso)"))
 
 
 def keep_home_front(adb: Adb, start: str = _HOME, sleep: Callable[[float], None] = time.sleep) -> None:

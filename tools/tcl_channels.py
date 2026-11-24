@@ -6,7 +6,19 @@ maneja la pantalla nativa: casilla → OK → «Intercambiar» (2.ª opción) �
 El cursor es la casilla cuyo ojo es `iv_chmg_*_icon_focus`; cada intercambio se verifica leyendo los
 nombres de las casillas en un volcado de uiautomator. El editor se cierra solo a los 15 s sin teclas.
 
-Uso:  python tools/tcl_channels.py <mapa.txt> [--dry-run] [--check-every N]
+Uso: USAGE, más abajo.
+"""
+import os
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # para tvopt.core.i18n al lanzarlo como script
+from tvopt.core.i18n import tr  # noqa: E402
+
+USAGE = """Uso:  python tools/tcl_channels.py <mapa.txt> [--dry-run] [--check-every N]
   --check-every N: lee la pantalla solo cada N intercambios (10 por defecto); los demás van a ciegas
   con movimientos deterministas, y al final una lectura completa replanifica lo que falte.
   mapa.txt: un nombre por línea, en el orden deseado (los nombres repetidos se repiten); «!» delante
@@ -14,14 +26,8 @@ Uso:  python tools/tcl_channels.py <mapa.txt> [--dry-run] [--check-every N]
   (diales ≥ 1000) no se tocan.
 Entorno: ADB (ruta a adb), TV_SERIAL (ip:puerto).
 """
-import os
-import subprocess
-import sys
-import time
-import xml.etree.ElementTree as ET
-
 ADB = os.environ.get("ADB", "adb")
-SERIAL = os.environ.get("TV_SERIAL") or sys.exit("Indica la tele con la variable TV_SERIAL (ip:puerto)")
+SERIAL = os.environ.get("TV_SERIAL") or sys.exit(tr("Indica la tele con la variable TV_SERIAL (ip:puerto)"))
 ROWS = 7                                  # casillas por columna en la cuadrícula
 MANAGER = "com.tcl.tv/.channelmanager.ChannelManagerActivity"
 ID = "com.tcl.tv:id/"
@@ -93,7 +99,7 @@ def open_editor():
         if cur:
             return cur
         time.sleep(0.8)
-    sys.exit("No encuentro el cursor en el editor de canales")
+    sys.exit(tr("No encuentro el cursor en el editor de canales"))
 
 
 def move(c, t):
@@ -161,7 +167,7 @@ def plan(tv, order):
             continue
         q = next((q for q in sorted(at) if q > p and at[q] == want), None)
         if q is None:
-            sys.exit(f"«{want}» no está en la TV (o no quedan más copias) para el dial {p}")
+            sys.exit(tr("«{name}» no está en la TV (o no quedan más copias) para el dial {dial}", name=want, dial=p))
         swaps.append((p, q))
         at[p], at[q] = at[q], at[p]
     return swaps, at
@@ -204,7 +210,7 @@ def run_swaps(cur, swaps, names, every):
             if not is_open():
                 cur = open_editor()
             cur, err = swap(cur, p, q, names)
-            print(f"{i:>2}. {p} <-> {q} {'OK (comprobado)' if not err else 'ERROR: ' + err}", flush=True)
+            print(f"{i:>2}. {p} <-> {q} {tr('OK (comprobado)') if not err else 'ERROR: ' + err}", flush=True)
             if err:
                 return cur, False
         else:
@@ -216,7 +222,7 @@ def run_swaps(cur, swaps, names, every):
 
 def main():
     if len(sys.argv) < 2:
-        sys.exit(__doc__)
+        sys.exit(tr(USAGE))
     order, hide = parse_map(sys.argv[1])
     dry = "--dry-run" in sys.argv
     every = int(sys.argv[sys.argv.index("--check-every") + 1]) if "--check-every" in sys.argv else 10
@@ -224,7 +230,7 @@ def main():
     for attempt in range(3):              # si un punto de control falla, se relee todo y se replanifica
         tv, cur = read_all(cur)
         swaps, _ = plan(tv, order)
-        print(f"{len(tv)} canales leídos · {len(swaps)} intercambios pendientes", flush=True)
+        print(tr("{channels} canales leídos · {swaps} intercambios pendientes", channels=len(tv), swaps=len(swaps)), flush=True)
         if dry or not swaps:
             break
         cur, ok = run_swaps(cur, swaps, {p: v[0] for p, v in tv.items()}, every)
@@ -233,7 +239,7 @@ def main():
             left, _ = plan(tv, order)
             if not left:
                 break
-            print(f"Comprobación final: quedan {len(left)}; replanifico", flush=True)
+            print(tr("Comprobación final: quedan {left}; replanifico", left=len(left)), flush=True)
     if dry:
         return
     names = {p: v[0] for p, v in tv.items()}
@@ -243,12 +249,13 @@ def main():
         cur = goto(cur, p)
         cells, _, _ = screen()
         if cells.get(p, ("", False))[1]:
-            print(f"  {p} {names[p]} ya estaba oculto")
+            print("  " + tr("{dial} {name} ya estaba oculto", dial=p, name=names[p]))
             continue
         key("DPAD_CENTER", 0.9)
         key("DPAD_CENTER", 1.0)           # 1.ª opción: «Ocultar»
         cells, _, _ = screen()
-        print(f"  ocultar {p} {names[p]}: {'OK' if cells.get(p, ('', False))[1] else 'sin confirmar'}", flush=True)
+        print("  " + tr("ocultar {dial} {name}: {result}", dial=p, name=names[p],
+                         result="OK" if cells.get(p, ("", False))[1] else tr("sin confirmar")), flush=True)
     key("BACK", 1.5)
 
 

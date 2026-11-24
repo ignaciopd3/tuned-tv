@@ -11,6 +11,8 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from tvopt.core.i18n import N_, language, tr
+
 PERF_SECTIONS: dict[str, str] = {
     "stat1": "head -1 /proc/stat",
     "nap": "sleep 1",
@@ -31,18 +33,18 @@ PERF_SECTIONS: dict[str, str] = {
 _OURS = frozenset({"top", "sh", "dumpsys", "grep", "cat", "head", "sleep", "wc"})
 
 _KINDS = {
-    "native": "nativo",
-    "sys": "sistema",
-    "pers": "persistente",
-    "persvc": "servicio persistente",
-    "fore": "en pantalla",
-    "vis": "visible",
-    "percept": "perceptible",
-    "servicea": "servicio",
-    "serviceb": "servicio",
-    "prev": "anterior",
-    "home": "inicio",
-    "cached": "en caché",
+    "native": N_("nativo"),
+    "sys": N_("sistema"),
+    "pers": N_("persistente"),
+    "persvc": N_("servicio persistente"),
+    "fore": N_("en pantalla"),
+    "vis": N_("visible"),
+    "percept": N_("perceptible"),
+    "servicea": N_("servicio"),
+    "serviceb": N_("servicio"),
+    "prev": N_("anterior"),
+    "home": N_("inicio"),
+    "cached": N_("en caché"),
 }
 
 
@@ -183,40 +185,50 @@ def parse(sections: dict[str, str], taken_at: str, seconds: float) -> PerfReport
 
 
 def _mb(kb: int) -> str:
-    return f"{kb // 1024:,} MB".replace(",", ".")
+    text = f"{kb // 1024:,} MB"
+    return text if language() == "en" else text.replace(",", ".")
 
 
 def to_markdown(r: PerfReport, profile_name: str) -> str:
     """Informe legible: memoria, CPU, procesos y paquetes."""
     swap_used = r.swap_total_kb - r.swap_free_kb
     lines = [
-        f"# Rendimiento · {profile_name} · {r.taken_at}",
+        tr("# Rendimiento · {profile} · {taken}", profile=profile_name, taken=r.taken_at),
         "",
-        "| Medida | Valor |",
+        tr("| Medida | Valor |"),
         "|---|---|",
-        f"| Memoria disponible | {_mb(r.mem_available_kb)} de {_mb(r.mem_total_kb)} "
-        f"({100 * r.mem_available_kb // max(r.mem_total_kb, 1)} %) |",
-        f"| Memoria de intercambio en uso | {_mb(swap_used)} de {_mb(r.swap_total_kb)} |",
-        f"| CPU ocupada (1 s) | {r.cpu_busy_pct} % de {r.cores} núcleos |",
-        f"| Carga media (1, 5 y 15 min) | {r.load[0]} · {r.load[1]} · {r.load[2]} |",
-        f"| Procesos | {r.tasks} |",
-        f"| Paquetes activos | {r.packages_enabled} de {r.packages} ({r.packages_third} de terceros) |",
-        f"| Almacenamiento usado | {r.data_used_pct} % |",
-        f"| Encendida desde hace | {r.uptime_h} h |",
+        tr(
+            "| Memoria disponible | {available} de {total} ({pct} %) |",
+            available=_mb(r.mem_available_kb),
+            total=_mb(r.mem_total_kb),
+            pct=100 * r.mem_available_kb // max(r.mem_total_kb, 1),
+        ),
+        tr("| Memoria de intercambio en uso | {used} de {total} |", used=_mb(swap_used), total=_mb(r.swap_total_kb)),
+        tr("| CPU ocupada (1 s) | {pct} % de {cores} núcleos |", pct=r.cpu_busy_pct, cores=r.cores),
+        tr("| Carga media (1, 5 y 15 min) | {a} · {b} · {c} |", a=r.load[0], b=r.load[1], c=r.load[2]),
+        tr("| Procesos | {tasks} |", tasks=r.tasks),
+        tr(
+            "| Paquetes activos | {enabled} de {total} ({third} de terceros) |",
+            enabled=r.packages_enabled,
+            total=r.packages,
+            third=r.packages_third,
+        ),
+        tr("| Almacenamiento usado | {pct} % |", pct=r.data_used_pct),
+        tr("| Encendida desde hace | {hours} h |", hours=r.uptime_h),
         "",
-        "## Lo que más CPU usa",
+        tr("## Lo que más CPU usa"),
         "",
-        "| Proceso | CPU |",
+        tr("| Proceso | CPU |"),
         "|---|---|",
-        *(f"| {p.name} | {p.cpu} % |" for p in r.top_cpu),
+        *(tr("| {name} | {pct} % |", name=p.name, pct=p.cpu) for p in r.top_cpu),
         "",
-        "## Lo que más memoria usa",
+        tr("## Lo que más memoria usa"),
         "",
-        "| Proceso | Estado | Memoria (PSS) |",
+        tr("| Proceso | Estado | Memoria (PSS) |"),
         "|---|---|---|",
-        *(f"| {p.name} | {_KINDS.get(p.kind, p.kind)} | {_mb(p.pss_kb)} |" for p in r.top_mem),
+        *(f"| {p.name} | {tr(_KINDS[p.kind]) if p.kind in _KINDS else p.kind} | {_mb(p.pss_kb)} |" for p in r.top_mem),
         "",
-        f"Medido en {r.seconds} s, solo leyendo.",
+        tr("Medido en {seconds} s, solo leyendo.", seconds=r.seconds),
         "",
     ]
     return "\n".join(lines)
@@ -243,12 +255,29 @@ def compare(before: PerfReport, after: PerfReport) -> list[str]:
     swap_before = before.swap_total_kb - before.swap_free_kb
     swap_after = after.swap_total_kb - after.swap_free_kb
     return [
-        f"Memoria disponible: {_mb(before.mem_available_kb)} → {_mb(after.mem_available_kb)} "
-        f"({signed((after.mem_available_kb - before.mem_available_kb) // 1024, ' MB')})",
-        f"Intercambio en uso: {_mb(swap_before)} → {_mb(swap_after)} "
-        f"({signed((swap_after - swap_before) // 1024, ' MB')})",
-        f"CPU ocupada: {before.cpu_busy_pct} % → {after.cpu_busy_pct} %",
-        f"Procesos: {before.tasks} → {after.tasks} ({signed(after.tasks - before.tasks)})",
-        f"Paquetes activos: {before.packages_enabled} → {after.packages_enabled} "
-        f"({signed(after.packages_enabled - before.packages_enabled)})",
+        tr(
+            "Memoria disponible: {before} → {after} ({diff})",
+            before=_mb(before.mem_available_kb),
+            after=_mb(after.mem_available_kb),
+            diff=signed((after.mem_available_kb - before.mem_available_kb) // 1024, " MB"),
+        ),
+        tr(
+            "Intercambio en uso: {before} → {after} ({diff})",
+            before=_mb(swap_before),
+            after=_mb(swap_after),
+            diff=signed((swap_after - swap_before) // 1024, " MB"),
+        ),
+        tr("CPU ocupada: {before} % → {after} %", before=before.cpu_busy_pct, after=after.cpu_busy_pct),
+        tr(
+            "Procesos: {before} → {after} ({diff})",
+            before=before.tasks,
+            after=after.tasks,
+            diff=signed(after.tasks - before.tasks),
+        ),
+        tr(
+            "Paquetes activos: {before} → {after} ({diff})",
+            before=before.packages_enabled,
+            after=after.packages_enabled,
+            diff=signed(after.packages_enabled - before.packages_enabled),
+        ),
     ]

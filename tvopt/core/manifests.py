@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tvopt.core.i18n import tr
 from tvopt.core.profile import ProfileError
 
 PKG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
@@ -61,15 +62,17 @@ def load_packages(path: Path, protected: frozenset[str], into: dict[str, str]) -
         pkg = fields[0]
         method = fields[1] if len(fields) > 1 else "disable"
         if len(fields) > 2:
-            raise ProfileError(f"{path}:{n}: sobran campos: {' '.join(fields[2:])}")
+            raise ProfileError(tr("{where}: sobran campos: {extra}", where=f"{path}:{n}", extra=" ".join(fields[2:])))
         if not PKG_RE.match(pkg):
-            raise ProfileError(f"{path}:{n}: nombre de paquete inválido: {pkg}")
+            raise ProfileError(tr("{where}: nombre de paquete inválido: {pkg}", where=f"{path}:{n}", pkg=pkg))
         if method not in ("disable", "uninstall"):
-            raise ProfileError(f"{path}:{n}: método inválido '{method}' (disable|uninstall)")
+            raise ProfileError(
+                tr("{where}: método inválido '{method}' (disable|uninstall)", where=f"{path}:{n}", method=method)
+            )
         if pkg in protected:
-            raise ProfileError(f"{path}:{n}: {pkg} está protegido (lib/protected.list)")
+            raise ProfileError(tr("{where}: {pkg} está protegido (lib/protected.list)", where=f"{path}:{n}", pkg=pkg))
         if pkg in into:
-            raise ProfileError(f"{path}:{n}: {pkg} repetido")
+            raise ProfileError(tr("{where}: {name} repetido", where=f"{path}:{n}", name=pkg))
         into[pkg] = method
 
 
@@ -87,17 +90,19 @@ def load_settings(path: Path, into: dict[str, str], order: list[str]) -> None:
         if not fields:
             continue
         if len(fields) != 3:
-            raise ProfileError(f"{path}:{n}: se espera «namespace clave valor»")
+            raise ProfileError(tr("{where}: se espera «namespace clave valor»", where=f"{path}:{n}"))
         ns, key, value = fields
         if ns not in NAMESPACES:
-            raise ProfileError(f"{path}:{n}: namespace inválido: {ns}")
+            raise ProfileError(tr("{where}: namespace inválido: {ns}", where=f"{path}:{n}", ns=ns))
         if not KEY_RE.match(key):
-            raise ProfileError(f"{path}:{n}: clave inválida: {key}")
+            raise ProfileError(tr("{where}: clave inválida: {key}", where=f"{path}:{n}", key=key))
         if not VAL_RE.match(value):
-            raise ProfileError(f"{path}:{n}: valor con caracteres no permitidos: {value}")
+            raise ProfileError(
+                tr("{where}: valor con caracteres no permitidos: {value}", where=f"{path}:{n}", value=value)
+            )
         name = f"{ns} {key}"
         if name in into:
-            raise ProfileError(f"{path}:{n}: {name} repetido")
+            raise ProfileError(tr("{where}: {name} repetido", where=f"{path}:{n}", name=name))
         into[name] = value
         order.append(name)
 
@@ -111,19 +116,26 @@ def load_appops(path: Path, protected: frozenset[str], into: dict[str, str], ord
         if not fields:
             continue
         if len(fields) != 3:
-            raise ProfileError(f"{path}:{n}: se espera «paquete OPERACIÓN modo»")
+            raise ProfileError(tr("{where}: se espera «paquete OPERACIÓN modo»", where=f"{path}:{n}"))
         pkg, op, mode = fields
         if not PKG_RE.match(pkg):
-            raise ProfileError(f"{path}:{n}: nombre de paquete inválido: {pkg}")
+            raise ProfileError(tr("{where}: nombre de paquete inválido: {pkg}", where=f"{path}:{n}", pkg=pkg))
         if not OP_RE.match(op):
-            raise ProfileError(f"{path}:{n}: operación inválida: {op}")
+            raise ProfileError(tr("{where}: operación inválida: {op}", where=f"{path}:{n}", op=op))
         if mode not in OP_MODES:
-            raise ProfileError(f"{path}:{n}: modo inválido '{mode}' ({'|'.join(OP_MODES)})")
+            raise ProfileError(
+                tr(
+                    "{where}: modo inválido '{mode}' ({modes})",
+                    where=f"{path}:{n}",
+                    mode=mode,
+                    modes="|".join(OP_MODES),
+                )
+            )
         if pkg in protected:
-            raise ProfileError(f"{path}:{n}: {pkg} está protegido (lib/protected.list)")
+            raise ProfileError(tr("{where}: {pkg} está protegido (lib/protected.list)", where=f"{path}:{n}", pkg=pkg))
         name = f"{pkg} {op}"
         if name in into:
-            raise ProfileError(f"{path}:{n}: {name} repetido")
+            raise ProfileError(tr("{where}: {name} repetido", where=f"{path}:{n}", name=name))
         into[name] = mode
         order.append(name)
 
@@ -137,13 +149,21 @@ def load_props(path: Path, into: dict[str, str], order: list[str]) -> None:
         if not fields:
             continue
         if len(fields) != 2:
-            raise ProfileError(f"{path}:{n}: se espera «propiedad valor»")
+            raise ProfileError(tr("{where}: se espera «propiedad valor»", where=f"{path}:{n}"))
         name, value = fields
         if not PROP_RE.match(name):
-            raise ProfileError(f"{path}:{n}: solo se admiten log.tag.<etiqueta> y persist.log.tag.<etiqueta>: {name}")
+            raise ProfileError(
+                tr(
+                    "{where}: solo se admiten log.tag.<etiqueta> y persist.log.tag.<etiqueta>: {name}",
+                    where=f"{path}:{n}",
+                    name=name,
+                )
+            )
         if value not in LOG_LEVELS:
-            raise ProfileError(f"{path}:{n}: nivel inválido '{value}' (V, D, I, W, E, F o S)")
+            raise ProfileError(
+                tr("{where}: nivel inválido '{value}' (V, D, I, W, E, F o S)", where=f"{path}:{n}", value=value)
+            )
         if name in into:
-            raise ProfileError(f"{path}:{n}: {name} repetido")
+            raise ProfileError(tr("{where}: {name} repetido", where=f"{path}:{n}", name=name))
         into[name] = value
         order.append(name)

@@ -20,6 +20,13 @@ ROOT = Path(__file__).resolve().parent.parent
 FAKE_ADB = ROOT / "tests" / "fake_adb.sh"
 PERF_FIXTURES = ROOT / "tests" / "fixtures" / "android_perf"
 
+
+@pytest.fixture(autouse=True)
+def _spanish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Las pruebas leen los mensajes en español, el idioma del código; test_i18n.py prueba el inglés."""
+    monkeypatch.setenv("TVOPT_LANG", "es")
+
+
 PROFILE_ENV = """# perfil de test
 PROFILE_NAME="Perfil de test"   # comentario final
 MATCH_PROP=persist.tcl.client_type

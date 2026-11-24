@@ -5,7 +5,20 @@ Lo sensible (sesión, claves locales, IP pública) se guarda solo en ~/Documents
 repo; por pantalla nunca sale una clave. Se ejecuta con el Python de ~/Documents/casa-tuya/venv, que tiene
 tuya-device-sharing-sdk, tinytuya y qrcode.
 
-Uso:
+Uso: USAGE, más abajo.
+"""
+import base64
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # para tvopt.core.i18n al lanzarlo como script
+from tvopt.core.i18n import tr  # noqa: E402
+
+USAGE = """Uso:
   casa_probe.py login <código>   código de usuario de Smart Life (Yo > Ajustes > Cuenta y seguridad); deja qr.png
                                  y espera hasta 3 min a que se escanee con la app
   casa_probe.py devices          lista los aparatos y los guarda en aparatos.json
@@ -20,13 +33,6 @@ Uso:
 roles.json (en CASA_DIR, fuera del repo): papel en Casa → nombre en Smart Life, p. ej.
   {"luz": "Luz Salón", "calefactor": "Calefactor", "gas": "Gas sensor", "clima": "…", "puerta": "…"}
 """
-import base64
-import json
-import os
-import subprocess
-import sys
-import time
-from pathlib import Path
 
 HOME = Path(os.environ.get("CASA_DIR", Path.home() / "Documents" / "casa-tuya"))
 SESSION, DEVICES, QR_PNG = HOME / "sesion.json", HOME / "aparatos.json", HOME / "qr.png"
@@ -53,7 +59,7 @@ def summarize(dev):
 
 def save_json(path, data):
     if inside_repo(path):
-        sys.exit(f"Me niego a guardar datos de la cuenta dentro del repo: {path}")
+        sys.exit(tr("Me niego a guardar datos de la cuenta dentro del repo: {path}", path=path))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
@@ -83,7 +89,7 @@ def push_payload(devs, roles=PUSH_ROLES):
             out[role] = {"id": rec["id"]}
             continue
         if not rec or not all(rec.get(k) for k in ("local_key", "lan_ip", "version")):
-            raise ValueError(f"Falta «{name}» con clave, IP y versión: ejecuta devices y scan antes")
+            raise ValueError(tr("Falta «{name}» con clave, IP y versión: ejecuta devices y scan antes", name=name))
         out[role] = {"id": rec["id"], "key": rec["local_key"], "ip": rec["lan_ip"], "version": rec["version"]}
     return out
 
@@ -91,11 +97,11 @@ def push_payload(devs, roles=PUSH_ROLES):
 def adb(*args):
     exe, serial = os.environ.get("ADB", "adb"), os.environ.get("TV_SERIAL")
     if not serial:
-        sys.exit("Indica la tele con la variable TV_SERIAL (ip:puerto)")
+        sys.exit(tr("Indica la tele con la variable TV_SERIAL (ip:puerto)"))
     r = subprocess.run([exe, "-s", serial, *args], capture_output=True, text=True)
     said = (r.stdout + r.stderr).strip()
     if r.returncode != 0 or "Error" in said or "Exception" in said:
-        sys.exit("La tele no aceptó la orden: " + (said.splitlines()[-1][:200] if said else "sin respuesta"))
+        sys.exit(tr("La tele no aceptó la orden: {detail}", detail=said.splitlines()[-1][:200] if said else tr("sin respuesta")))
     return said
 
 
@@ -110,8 +116,9 @@ def cmd_push():
     adb("shell", "appops", "set", CASA_PKG, "SYSTEM_ALERT_WINDOW", "allow")
     sent = [r for r, v in payload.items() if v is not None]
     gone = [r for r, v in payload.items() if v is None]
-    print(f"Enviado a Casa: {', '.join(sent)}" + (f"; olvidado: {', '.join(gone)}" if gone else "")
-          + "; avisos encima de todo permitidos")   # nunca la clave
+    forgotten = tr("; olvidado: {roles}", roles=", ".join(gone)) if gone else ""
+    print(tr("Enviado a Casa: {roles}{forgotten}; avisos encima de todo permitidos",
+             roles=", ".join(sent), forgotten=forgotten))   # nunca la clave
 
 
 def cmd_tv_login(user_code):
@@ -121,11 +128,11 @@ def cmd_tv_login(user_code):
     ctl = LoginControl()
     resp = ctl.qr_code(CLIENT_ID, SCHEMA, user_code)
     if not resp.get("success"):
-        sys.exit(f"Tuya no dio el QR: {resp.get('msg') or resp.get('code')}")
+        sys.exit(tr("Tuya no dio el QR: {detail}", detail=resp.get('msg') or resp.get('code')))
     token = resp["result"]["qrcode"]
     HOME.mkdir(parents=True, exist_ok=True)
     qrcode.make(qr_payload(token)).save(QR_PNG)
-    print(f"QR listo: {QR_PNG}", flush=True)
+    print(tr("QR listo: {path}", path=QR_PNG), flush=True)
     try:
         for _ in range(90):
             time.sleep(2)
@@ -135,9 +142,9 @@ def cmd_tv_login(user_code):
                            "token": info}
                 b64 = base64.b64encode(json.dumps(session).encode("utf-8")).decode("ascii")
                 adb("shell", "am", "start", "-n", CASA_IMPORT, "--es", "session_b64", b64)
-                print("Sesión de la tele enviada a Casa.", flush=True)
+                print(tr("Sesión de la tele enviada a Casa."), flush=True)
                 return
-        sys.exit("No se escaneó el QR en 3 minutos.")
+        sys.exit(tr("No se escaneó el QR en 3 minutos."))
     finally:
         QR_PNG.unlink(missing_ok=True)
 
@@ -148,11 +155,11 @@ def cmd_login(user_code):
     ctl = LoginControl()
     resp = ctl.qr_code(CLIENT_ID, SCHEMA, user_code)
     if not resp.get("success"):
-        sys.exit(f"Tuya no dio el QR: {resp.get('msg') or resp.get('code')}")
+        sys.exit(tr("Tuya no dio el QR: {detail}", detail=resp.get('msg') or resp.get('code')))
     token = resp["result"]["qrcode"]
     HOME.mkdir(parents=True, exist_ok=True)
     qrcode.make(qr_payload(token)).save(QR_PNG)
-    print(f"QR listo: {QR_PNG}", flush=True)
+    print(tr("QR listo: {path}", path=QR_PNG), flush=True)
     for _ in range(90):
         time.sleep(2)
         ok, info = ctl.login_result(token, CLIENT_ID, user_code)
@@ -160,10 +167,10 @@ def cmd_login(user_code):
             save_json(SESSION, {"user_code": user_code, "terminal_id": info["terminal_id"],
                                 "endpoint": info["endpoint"], "token": info})
             QR_PNG.unlink(missing_ok=True)
-            print("Sesión guardada.", flush=True)
+            print(tr("Sesión guardada."), flush=True)
             return
     QR_PNG.unlink(missing_ok=True)
-    sys.exit("No se escaneó el QR en 3 minutos.")
+    sys.exit(tr("No se escaneó el QR en 3 minutos."))
 
 
 def open_manager():
@@ -231,7 +238,7 @@ def cmd_listen(seconds):
 
     m.add_device_listener(Show())
     m.refresh_mq()
-    print(f"Escuchando {seconds} s desde {time.strftime('%H:%M:%S')}", flush=True)
+    print(tr("Escuchando {seconds} s desde {time}", seconds=seconds, time=time.strftime('%H:%M:%S')), flush=True)
     time.sleep(seconds)
     # Stop only the MQTT thread: Manager.unload() would log this terminal out (/v1.0/m/token/terminal/expire), and
     # it leaves that thread running, so the process never ends.
@@ -245,15 +252,15 @@ def cmd_toggle(name):
     # Names in the app may carry a trailing space («Luz Salón »).
     rec = next((r for r in devs.values() if (r.get("name") or "").strip().casefold() == name.strip().casefold()), None)
     if rec is None:
-        sys.exit(f"No hay ningún aparato llamado «{name}»")
+        sys.exit(tr("No hay ningún aparato llamado «{name}»", name=name))
     if not (rec.get("local_key") and rec.get("lan_ip")):
-        sys.exit("Falta su clave local o su IP en casa: ejecuta devices y scan antes")
+        sys.exit(tr("Falta su clave local o su IP en casa: ejecuta devices y scan antes"))
     d = tinytuya.OutletDevice(rec["id"], rec["lan_ip"], rec["local_key"], version=float(rec.get("version") or 3.3))
     on = (d.status().get("dps") or {}).get("1")
     if on is None:
-        sys.exit("El aparato no respondió en local (¿versión de protocolo o clave?)")
+        sys.exit(tr("El aparato no respondió en local (¿versión de protocolo o clave?)"))
     d.set_status(not on, 1)
-    print(f"{rec['name']}: {'encendido' if not on else 'apagado'}")
+    print(f"{rec['name']}: {tr('encendido') if not on else tr('apagado')}")
 
 
 def main(argv):
@@ -261,7 +268,7 @@ def main(argv):
             "listen": lambda a: cmd_listen(int(a[0]) if a else 120), "toggle": lambda a: cmd_toggle(" ".join(a)), "push": lambda a: cmd_push(),
             "tv-login": lambda a: cmd_tv_login(a[0])}
     if not argv or argv[0] not in cmds or (argv[0] in ("login", "toggle", "tv-login") and len(argv) < 2):
-        sys.exit(__doc__)
+        sys.exit(tr(USAGE))
     cmds[argv[0]](argv[1:])
 
 

@@ -68,10 +68,10 @@ The engine refuses to touch any TV while `MATCH_VALUE` is `CAMBIAR`.
 
 ```bash
 export TV_SERIAL=<tv-ip>:5555
-uv run run.py motor --profile <your-profile> --action audit
-uv run run.py medir --perfil <your-profile>                      # before, idle at Home
-uv run run.py motor --profile <your-profile> --action all --dry-run
-uv run run.py motor --profile <your-profile> --action all
+uv run run.py engine --profile <your-profile> --action audit
+uv run run.py measure --profile <your-profile>                      # before, idle at Home
+uv run run.py engine --profile <your-profile> --action all --dry-run
+uv run run.py engine --profile <your-profile> --action all
 ```
 
 Then check, one by one, everything people use:
@@ -85,7 +85,7 @@ Then check, one by one, everything people use:
 - casting;
 - the TV after a reboot.
 
-Measure again (`run.py medir`), idle at Home. If something broke, `--action rollback` and move that package to
+Measure again (`run.py measure`), idle at Home. If something broke, `--action rollback` and move that package to
 `packages.caution` with a note.
 
 ### 6. Write the model's README
@@ -139,6 +139,9 @@ falls back to English until someone translates it.
   in a cleanyourtv clone and export the patch. Casa's tests check that every language has every text with the same
   placeholders.
 - Translations cost nothing at run time: Android picks the TV's language once, when the app starts.
+- **The tool on the computer** writes its messages in Spanish inside `tr()` and keeps the English in
+  `tvopt/core/i18n_en.py`. A new message needs its English line; `tests/test_i18n.py` fails otherwise, and also if a
+  message is printed without `tr()`. It speaks the system's language, or the one in `TVOPT_LANG` (`en`, `es`).
 
 ## Reviews
 

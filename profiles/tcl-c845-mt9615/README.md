@@ -63,7 +63,7 @@ kept in memory, so it still opens in 0.13 s.
 
 ## Results
 
-Measured at idle with `run.py medir`, from the first measurement to the last:
+Measured at idle with `run.py measure`, from the first measurement to the last:
 
 | | Before | After |
 |---|---|---|
@@ -135,11 +135,11 @@ Then run `--action rollback` for the run that disabled `setupwraith`.
 
 ```bash
 export TV_SERIAL=<tv-ip>:5555
-uv run run.py medir --perfil tcl-c845-mt9615
-uv run run.py motor --profile tcl-c845-mt9615 --action all --dry-run
-uv run run.py motor --profile tcl-c845-mt9615 --action all
-uv run run.py launcher --perfil tcl-c845-mt9615        # optional: the clean home
-uv run run.py motor --profile tcl-c845-mt9615 --action rollback --all   # back to how it came
+uv run run.py measure --profile tcl-c845-mt9615
+uv run run.py engine --profile tcl-c845-mt9615 --action all --dry-run
+uv run run.py engine --profile tcl-c845-mt9615 --action all
+uv run run.py launcher --profile tcl-c845-mt9615        # optional: the clean home
+uv run run.py engine --profile tcl-c845-mt9615 --action rollback --all   # back to how it came
 ```
 
 ## Credits

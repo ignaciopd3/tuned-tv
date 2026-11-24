@@ -204,10 +204,10 @@ incluyen lo que se deshabilitó en ese modelo sin efectos secundarios, y lo arri
 </details>
 
 <details>
-<summary><b>¿Por qué las órdenes se llaman «medir» y «motor»?</b></summary>
+<summary><b>¿En qué idioma habla la herramienta?</b></summary>
 
-El proyecto empezó en español. El código y sus comentarios siguen en español; la documentación está en los dos
-idiomas.
+En el de tu sistema: español o inglés. Con `TVOPT_LANG=es` o `en` lo eliges tú. Las órdenes valen en los dos idiomas
+(`medir` o `measure`, `motor` o `engine`, `--perfil` o `--profile`). Lo que sale en la tele sigue el idioma de la tele.
 </details>
 
 ## Colaborar

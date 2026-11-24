@@ -7,6 +7,7 @@ import stat
 from pathlib import Path
 
 from tvopt.adb.client import Adb, AdbError
+from tvopt.core.i18n import tr
 from tvopt.core.log import Log
 
 WIFI = (
@@ -49,17 +50,18 @@ def report(run_dir: Path, profile_name: str, match_prop: str) -> str:
         f"wificountrycode={p('ro.boot.wificountrycode')} · persist.sys.country={p('persist.sys.country')}"
         f" · locale={p('ro.product.locale')}"
     )
-    return f"""# Auditoría · {profile_name} · run {run_dir.name}
+    return tr(
+        """# Auditoría · {profile} · run {run}
 
 | Campo | Valor |
 |---|---|
-| Marca / modelo | {p("ro.product.brand")} / {p("ro.product.model")} |
-| {match_prop} | {p(match_prop)} |
-| Chip | {p("ro.hardware.version_id")} (plataforma {p("ro.board.platform")}) |
-| Producto / dispositivo | {p("ro.product.name")} / {p("ro.product.device")} |
+| Marca / modelo | {brand} / {model} |
+| {match_prop} | {match_value} |
+| Chip | {chip} (plataforma {platform}) |
+| Producto / dispositivo | {product} / {device} |
 | Android / SDK / parche | {android} |
-| Build | {p("ro.build.fingerprint")} |
-| ABI | {p("ro.product.cpu.abilist")} |
+| Build | {fingerprint} |
+| ABI | {abi} |
 | País (props) | {country} |
 | Country code Wi-Fi (cmd wifi) | {cc} |
 
@@ -67,10 +69,31 @@ def report(run_dir: Path, profile_name: str, match_prop: str) -> str:
 
 | Instalados | Deshabilitados | Desinstalados (usuario 0) | Sistema | Terceros |
 |---|---|---|---|---|
-| {n_inst} | {n_disabled} | {n_all - n_inst} | {n_system} | {n_third} |
+| {installed} | {disabled} | {uninstalled} | {system} | {third} |
 
 Ficheros: `before/` (estado completo, solo lectura) · `audit/wifi.txt` · `audit/packages.paths` (APK de cada paquete)
-"""
+""",
+        profile=profile_name,
+        run=run_dir.name,
+        brand=p("ro.product.brand"),
+        model=p("ro.product.model"),
+        match_prop=match_prop,
+        match_value=p(match_prop),
+        chip=p("ro.hardware.version_id"),
+        platform=p("ro.board.platform"),
+        product=p("ro.product.name"),
+        device=p("ro.product.device"),
+        android=android,
+        fingerprint=p("ro.build.fingerprint"),
+        abi=p("ro.product.cpu.abilist"),
+        country=country,
+        cc=cc,
+        installed=n_inst,
+        disabled=n_disabled,
+        uninstalled=n_all - n_inst,
+        system=n_system,
+        third=n_third,
+    )
 
 
 def run(adb: Adb, run_dir: Path, profile_name: str, match_prop: str, log: Log) -> None:
@@ -81,16 +104,16 @@ def run(adb: Adb, run_dir: Path, profile_name: str, match_prop: str, log: Log) -
         wifi = adb.shell(WIFI)
     except AdbError:
         wifi = ""
-        log.warn("Diagnóstico Wi-Fi incompleto (audit/wifi.txt)")
+        log.warn(tr("Diagnóstico Wi-Fi incompleto (audit/wifi.txt)"))
     (audit_dir / "wifi.txt").write_text(wifi, encoding="utf-8", newline="\n")
     try:
         paths = adb.shell("pm list packages -f -u")
     except AdbError:
         paths = ""
-        log.warn("No se pudieron leer las rutas de APK")
+        log.warn(tr("No se pudieron leer las rutas de APK"))
     lines = [line.removeprefix("package:") for line in paths.splitlines()]
     (audit_dir / "packages.paths").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8", newline="\n")
     (run_dir / "audit.md").write_text(report(run_dir, profile_name, match_prop), encoding="utf-8", newline="\n")
     for path in (*audit_dir.iterdir(), run_dir / "audit.md"):
         path.chmod(_READ_ONLY)
-    log.ok(f"Auditoría: {run_dir / 'audit.md'}")
+    log.ok(tr("Auditoría: {path}", path=run_dir / "audit.md"))

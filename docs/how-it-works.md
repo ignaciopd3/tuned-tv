@@ -3,11 +3,11 @@
 [Español](how-it-works.es.md) · [Back to the README](../README.md)
 
 ```
-profiles/<tv>/  ──►  engine (run.py motor)  ──►  the TV, over ADB
+profiles/<tv>/  ──►  engine (run.py engine)  ──►  the TV, over ADB
                        snapshot → audit → plan → apply in one batch → verify
                        └─► profiles/<tv>/backups/<run>/  (snapshots, plan, rollback.sh; never committed)
 launcher/       ──►  run.py launcher: cleanyourtv + patches → build (cached) → install → theme
-run.py medir    ──►  profiles/<tv>/backups/medidas/<time>.json and .md, compared with the previous one
+run.py measure    ──►  profiles/<tv>/backups/medidas/<time>.json and .md, compared with the previous one
 ```
 
 ## Profiles
@@ -32,7 +32,7 @@ Prime Video on Fire OS. The engine also protects whichever keyboard is active on
 
 ## The engine
 
-`uv run run.py motor --profile <tv> --action <action> [--dry-run] [--include-caution]`
+`uv run run.py engine --profile <tv> --action <action> [--dry-run] [--include-caution]`
 
 1. **Connect and verify** that the TV is the profile's model (`MATCH_PROP` = `MATCH_VALUE`). If not, nothing happens
    (exit code 3).
@@ -58,7 +58,7 @@ Each run leaves a folder in `profiles/<tv>/backups/<date-time>/`: `before/`, `af
 
 ## Measuring
 
-`uv run run.py medir --perfil <tv>` changes nothing. It records, in a single batch:
+`uv run run.py measure --profile <tv>` changes nothing. It records, in a single batch:
 
 - busy CPU over a sampling window, plus the busiest processes;
 - available memory and swap;
@@ -70,7 +70,7 @@ home screen: a playing video makes numbers incomparable.
 
 ## The launcher
 
-`uv run run.py launcher --perfil <tv> [--solo-compilar] [--forzar]`
+`uv run run.py launcher --profile <tv> [--build-only] [--force]`
 
 1. **Source:** cleanyourtv at the commit in `launcher/patches/BASE`, plus `launcher/patches/*.patch` in order, plus
    the add-ons listed in `launcher/patches/ADDONS`. They are checked out in the cleanyourtv clone on a

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from tvopt.adb.client import Adb, AdbError
 from tvopt.android_tv import audit, plan, snapshot
+from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 from tvopt.core.manifests import load_appops, load_packages, load_props, load_protected, load_settings
 from tvopt.core.profile import PROFILE_ID_RE, ProfileError, load_env
@@ -75,7 +76,7 @@ def parse(argv: list[str]) -> Options | None:
         arg = argv[i]
         if arg in ("--profile", "--action", "--serial", "--from"):
             if i + 1 >= len(argv):
-                raise Fail(2, f"Falta el valor de {arg}")
+                raise Fail(2, tr("Falta el valor de {arg}", arg=arg))
             value = argv[i + 1]
             if arg == "--profile":
                 o.profile = value
@@ -96,8 +97,8 @@ def parse(argv: list[str]) -> Options | None:
         elif arg in ("-h", "--help"):
             return None
         else:
-            print(USAGE, file=sys.stderr)
-            raise Fail(2, f"Opción desconocida: {arg}")
+            print(tr(USAGE), file=sys.stderr)
+            raise Fail(2, tr("Opción desconocida: {arg}", arg=arg))
         i += 1
     return o
 
@@ -117,26 +118,26 @@ def main(argv: list[str]) -> int:
 def _main(argv: list[str], log: Log) -> int:
     o = parse(argv)
     if o is None:
-        print(USAGE)
+        print(tr(USAGE))
         return 0
     if not o.profile or not o.action:
-        print(USAGE, file=sys.stderr)
-        raise Fail(2, "Faltan --profile y --action")
+        print(tr(USAGE), file=sys.stderr)
+        raise Fail(2, tr("Faltan --profile y --action"))
     if not PROFILE_ID_RE.match(o.profile):
-        raise Fail(2, f"Nombre de perfil inválido: {o.profile}")
+        raise Fail(2, tr("Nombre de perfil inválido: {profile}", profile=o.profile))
     if not o.serial:
-        raise Fail(2, "Indica la TV con --serial <ip:puerto> o la variable TV_SERIAL")
+        raise Fail(2, tr("Indica la TV con --serial <ip:puerto> o la variable TV_SERIAL"))
     profile_dir = Path(os.environ.get("TV_OPT_PROFILES_DIR") or ROOT / "profiles") / o.profile
     backups = profile_dir / "backups"
     if not profile_dir.is_dir():
-        raise Fail(2, f"No existe el perfil: {profile_dir}")
+        raise Fail(2, tr("No existe el perfil: {path}", path=profile_dir))
 
     # 1. Perfil y manifiestos, antes de tocar la red
     protected = load_protected(PROTECTED_LIST)
     env = load_env(profile_dir)
     if o.action not in _WANTS:
-        print(USAGE, file=sys.stderr)
-        raise Fail(2, f"Acción desconocida: {o.action}")
+        print(tr(USAGE), file=sys.stderr)
+        raise Fail(2, tr("Acción desconocida: {action}", action=o.action))
     with_pkgs, with_sets, with_remap, with_ops, with_props = _WANTS[o.action]
     want_pkgs: dict[str, str] = {}
     want_sets: dict[str, str] = {}
@@ -174,12 +175,20 @@ def _main(argv: list[str], log: Log) -> int:
     # 3. Ejecución con foto previa
     run_dir = snapshot.run_dir_new(backups)
     log.file = run_dir / "run.log"
-    log.info(f"Run {run_dir.name} · perfil {o.profile} · acción {o.action}{' (dry-run)' if o.dry_run else ''}")
+    log.info(
+        tr(
+            "Run {run} · perfil {profile} · acción {action}{dry}",
+            run=run_dir.name,
+            profile=o.profile,
+            action=o.action,
+            dry=" (dry-run)" if o.dry_run else "",
+        )
+    )
     snapshot.take(adb, run_dir / "before", log, tuple(op_order))
     original = backups / "ORIGINAL"
     if not original.is_file():
         original.write_text(run_dir.name + "\n", encoding="utf-8", newline="\n")
-        log.ok(f"Estado ORIGINAL de la TV guardado en {run_dir / 'before'}")
+        log.ok(tr("Estado ORIGINAL de la TV guardado en {path}", path=run_dir / "before"))
     if o.action in ("audit", "all"):
         audit.run(adb, run_dir, env.get("PROFILE_NAME") or o.profile, env["MATCH_PROP"], log)
 
@@ -204,13 +213,13 @@ def _main(argv: list[str], log: Log) -> int:
         plan.write(p, run_dir)
         print(plan.describe(p.lines), end="", flush=True)
         if not p.lines:
-            log.ok("Sin cambios: la TV ya cumple el perfil")
+            log.ok(tr("Sin cambios: la TV ya cumple el perfil"))
         elif o.dry_run:
-            log.info(f"Dry-run: plan en {run_dir / 'plan.txt'}; la TV no se ha tocado")
+            log.info(tr("Dry-run: plan en {path}; la TV no se ha tocado", path=run_dir / "plan.txt"))
         else:
             _write_rollback(run_dir, o.profile, o.serial, log)
             _apply(adb, run_dir, len(p.lines), o.profile, log)
-    log.ok(f"Hecho · {run_dir}")
+    log.ok(tr("Hecho · {path}", path=run_dir))
     return 0
 
 
@@ -219,7 +228,7 @@ def _connect(adb: Adb, log: Log) -> None:
         adb.connect()
     except AdbError as e:
         raise Fail(1, str(e)) from e
-    log.ok(f"Conectado a {adb.serial}")
+    log.ok(tr("Conectado a {serial}", serial=adb.serial))
 
 
 def _check_device(adb: Adb, env: dict[str, str], log: Log) -> None:
@@ -228,8 +237,16 @@ def _check_device(adb: Adb, env: dict[str, str], log: Log) -> None:
     except AdbError as e:
         raise Fail(1, str(e)) from e
     if got != env["MATCH_VALUE"]:
-        raise Fail(3, f"La TV no coincide con el perfil: {env['MATCH_PROP']}='{got}' (esperado '{env['MATCH_VALUE']}')")
-    log.ok(f"TV verificada: {env.get('PROFILE_NAME') or env['MATCH_VALUE']}")
+        raise Fail(
+            3,
+            tr(
+                "La TV no coincide con el perfil: {prop}='{got}' (esperado '{want}')",
+                prop=env["MATCH_PROP"],
+                got=got,
+                want=env["MATCH_VALUE"],
+            ),
+        )
+    log.ok(tr("TV verificada: {name}", name=env.get("PROFILE_NAME") or env["MATCH_VALUE"]))
 
 
 def _protect_active_keyboard(adb: Adb, want_pkgs: dict[str, str]) -> None:
@@ -240,7 +257,7 @@ def _protect_active_keyboard(adb: Adb, want_pkgs: dict[str, str]) -> None:
         raise Fail(1, str(e)) from e
     keyboard = current.split("/", 1)[0]
     if keyboard in want_pkgs:
-        raise Fail(2, f"{keyboard} es el teclado activo de esta TV: no se puede quitar")
+        raise Fail(2, tr("{keyboard} es el teclado activo de esta TV: no se puede quitar", keyboard=keyboard))
 
 
 def _run_script(adb: Adb, script: Path) -> tuple[int, str]:
@@ -255,16 +272,16 @@ def _write_rollback(run_dir: Path, profile_id: str, serial: str, log: Log) -> No
     path = run_dir / "rollback.sh"
     path.write_text(text.replace("@SERIAL@", serial), encoding="utf-8", newline="\n")
     path.chmod(0o755)
-    log.info(f"Rollback listo antes de tocar nada: {path}")
+    log.info(tr("Rollback listo antes de tocar nada: {path}", path=path))
 
 
 def _apply(adb: Adb, run_dir: Path, count: int, profile_id: str, log: Log) -> None:
-    log.info(f"Aplicando {count} cambios en un único lote…")
+    log.info(tr("Aplicando {count} cambios en un único lote…", count=count))
     started = time.perf_counter()
     rc, out = _run_script(adb, run_dir / "apply.remote.sh")
     (run_dir / "apply.out").write_text(out, encoding="utf-8", newline="\n")
     if rc != 0:
-        log.warn("El lote se interrumpió; reconectando para comprobar el estado real")
+        log.warn(tr("El lote se interrumpió; reconectando para comprobar el estado real"))
         _connect(adb, log)
     for line in out.splitlines():
         if line.startswith("FAIL"):
@@ -273,9 +290,20 @@ def _apply(adb: Adb, run_dir: Path, count: int, profile_id: str, log: Log) -> No
     bad = verify(run_dir, "after", "apply", log)
     if bad:
         raise Fail(
-            4, f"{bad} cambios sin aplicar. Para deshacer: run.py motor --profile {profile_id} --action rollback"
+            4,
+            tr(
+                "{bad} cambios sin aplicar. Para deshacer: run.py motor --profile {profile} --action rollback",
+                bad=bad,
+                profile=profile_id,
+            ),
         )
-    log.ok(f"{count} cambios aplicados y verificados ({time.perf_counter() - started:.1f} s)")
+    log.ok(
+        tr(
+            "{count} cambios aplicados y verificados ({seconds:.1f} s)",
+            count=count,
+            seconds=time.perf_counter() - started,
+        )
+    )
 
 
 def _plan_ops(run_dir: Path) -> tuple[str, ...]:
@@ -307,7 +335,7 @@ def verify(run_dir: Path, snap: str, mode: str, log: Log) -> int:
         else:
             continue
         if got != want:
-            log.error(f"Verificación: {a} {b} = '{got}' (esperado '{want}')")
+            log.error(tr("Verificación: {key} = '{got}' (esperado '{want}')", key=f"{a} {b}", got=got, want=want))
             bad += 1
     return bad
 
@@ -323,28 +351,33 @@ def _rollback(o: Options, adb: Adb, backups: Path, log: Log) -> None:
     if o.rb_from:
         target = backups / o.rb_from
         if not RUN_RE.match(o.rb_from) or not (target / "rollback.sh").is_file():
-            raise Fail(2, f"No hay rollback para el run '{o.rb_from}' en {backups}")
+            raise Fail(2, tr("No hay rollback para el run '{run}' en {path}", run=o.rb_from, path=backups))
         runs = [target]
     else:
         runs = pending(backups)
         if not runs:
-            raise Fail(1, f"No hay runs pendientes de revertir en {backups}")
+            raise Fail(1, tr("No hay runs pendientes de revertir en {path}", path=backups))
         if not o.rb_all:
             runs = runs[:1]
     for run_dir in runs:
         log.file = run_dir / "run.log"
-        log.info(f"Revirtiendo run {run_dir.name}…")
+        log.info(tr("Revirtiendo run {run}…", run=run_dir.name))
         rc, out = _run_script(adb, run_dir / "rollback.remote.sh")
         (run_dir / "rollback.out").write_text(out, encoding="utf-8", newline="\n")
         if rc != 0:
-            log.warn("Rollback interrumpido; reconectando para comprobar el estado")
+            log.warn(tr("Rollback interrumpido; reconectando para comprobar el estado"))
             _connect(adb, log)
         snap_dir = snapshot.fresh(run_dir, f"rollback-{time.strftime('%Y%m%d-%H%M%S')}")
         snapshot.take(adb, snap_dir, log, _plan_ops(run_dir))
         bad = verify(run_dir, snap_dir.name, "rollback", log)
         if bad:
             raise Fail(
-                4, f"Rollback de {run_dir.name} incompleto ({bad} diferencias). Es idempotente: vuelve a lanzarlo"
+                4,
+                tr(
+                    "Rollback de {run} incompleto ({bad} diferencias). Es idempotente: vuelve a lanzarlo",
+                    run=run_dir.name,
+                    bad=bad,
+                ),
             )
         (run_dir / "ROLLED_BACK").write_text(snap_dir.name.removeprefix("rollback-") + "\n", encoding="utf-8")
-        log.ok(f"Run {run_dir.name} revertido y verificado")
+        log.ok(tr("Run {run} revertido y verificado", run=run_dir.name))

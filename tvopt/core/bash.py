@@ -7,6 +7,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from tvopt.core.i18n import tr
+
 
 def _git_bash_candidates() -> list[Path]:
     roots = [os.environ.get("PROGRAMFILES", r"C:\Program Files"), os.environ.get("PROGRAMFILES(X86)", "")]
@@ -28,8 +30,8 @@ def find_bash() -> str:
         found = shutil.which("bash")
         if found and "system32" not in found.lower():
             return found
-        raise FileNotFoundError("No encuentro Git Bash: instala Git for Windows o indica su ruta en TVOPT_BASH")
+        raise FileNotFoundError(tr("No encuentro Git Bash: instala Git for Windows o indica su ruta en TVOPT_BASH"))
     found = shutil.which("bash")
     if not found:
-        raise FileNotFoundError("No encuentro bash en el PATH")
+        raise FileNotFoundError(tr("No encuentro bash en el PATH"))
     return found

@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from tvopt.core.i18n import tr
+
 UNSET = "__UNSET__"
 REMOTE_HELPER = 'tvopt_run() { if o=$("$@" 2>&1); then echo "OK $*"; else echo "FAIL $* :: $o"; fi; }'
 _SQ = "'\\''"  # comilla simple escapada para sh
@@ -41,7 +43,7 @@ def build(
     for pkg in sorted(want_pkgs):
         want, cur = want_pkgs[pkg], states.get(pkg, "absent")
         if cur == "absent":
-            warn(f"{pkg} no está en esta TV; se omite")
+            warn(tr("{pkg} no está en esta TV; se omite", pkg=pkg))
         elif want == "disable" and cur == "enabled":
             lines.append(f"pkg {pkg} disable {cur}")
             forward.append(f"tvopt_run pm disable-user --user 0 {pkg}")
@@ -66,7 +68,7 @@ def build(
         pkg, op = name.split(" ", 1)
         mode, prev = (want_ops or {})[name], (ops or {}).get(name, "absent")
         if prev == "absent":
-            warn(f"{pkg} no está en esta TV; se omite {op}")
+            warn(tr("{pkg} no está en esta TV; se omite {op}", pkg=pkg, op=op))
         elif prev != mode:
             lines.append(f"op {pkg} {op} {mode} {prev}")
             forward.append(f"tvopt_run cmd appops set {pkg} {op} {mode}")
@@ -104,16 +106,16 @@ def describe(lines: tuple[str, ...]) -> str:
     """El plan legible, como plan_print del motor de Bash; vacío si no hay cambios."""
     if not lines:
         return ""
-    out = [f"\nPlan: {len(lines)} cambios"]
+    out = ["\n" + tr("Plan: {count} cambios", count=len(lines))]
     for line in lines:
         kind, a, b, c, d = fields(line)
         if kind == "pkg":
-            out.append(f"  {b:<9} {a:<50} (ahora: {c})")
+            out.append(f"  {b:<9} {a:<50} " + tr("(ahora: {state})", state=c))
         elif kind == "set":
-            prev = "(sin definir)" + d[len(UNSET) :] if d.startswith(UNSET) else d
+            prev = tr("(sin definir)") + d[len(UNSET) :] if d.startswith(UNSET) else d
             out.append(f"  settings  {a} {b}: {prev} -> {c}")
         elif kind == "op":
             out.append(f"  appops    {a} {b}: {d} -> {c}")
         elif kind == "prop":
-            out.append(f"  propiedad {a}: {'(sin definir)' if c == UNSET else c} -> {b}")
+            out.append(f"  {tr('propiedad'):<9} {a}: {tr('(sin definir)') if c == UNSET else c} -> {b}")
     return "\n".join(out) + "\n\n"

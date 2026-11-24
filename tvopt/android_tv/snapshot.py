@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from tvopt.adb.client import Adb, AdbError
+from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 
 SECTIONS: dict[str, str] = {
@@ -36,7 +37,7 @@ def run_dir_new(backups: Path) -> Path:
         except FileExistsError:
             continue
         return candidate
-    raise Fail(1, f"No se pudo crear un directorio de run en {backups}")
+    raise Fail(1, tr("No se pudo crear un directorio de run en {path}", path=backups))
 
 
 def fresh(parent: Path, base: str) -> Path:
@@ -63,10 +64,10 @@ def take(adb: Adb, snap_dir: Path, log: Log, ops: tuple[str, ...] = ()) -> None:
     try:
         sections = adb.batch({**SECTIONS, **op_sections})
     except AdbError as e:
-        raise Fail(1, "No se pudo leer el estado de la TV (¿conexión caída?)") from e
+        raise Fail(1, tr("No se pudo leer el estado de la TV (¿conexión caída?)")) from e
     missing = [name for name in SECTIONS if name not in sections]
     if missing:
-        raise Fail(1, f"Snapshot incompleto en {snap_dir}: falta {missing[0]}")
+        raise Fail(1, tr("Snapshot incompleto en {path}: falta {missing}", path=snap_dir, missing=missing[0]))
     snap_dir.mkdir(parents=True, exist_ok=True)
     for name in SECTIONS:
         lines = sections[name].splitlines()
@@ -81,7 +82,7 @@ def take(adb: Adb, snap_dir: Path, log: Log, ops: tuple[str, ...] = ()) -> None:
         text = "".join(f"{name} {mode}\n" for name, mode in zip(ops, modes, strict=True))
         path.write_text(text, encoding="utf-8", newline="\n")
         path.chmod(_READ_ONLY)
-    log.info(f"Snapshot guardado: {snap_dir} ({time.perf_counter() - started:.1f} s)")
+    log.info(tr("Snapshot guardado: {path} ({seconds:.1f} s)", path=snap_dir, seconds=time.perf_counter() - started))
 
 
 def load(snap_dir: Path) -> tuple[dict[str, str], dict[str, str]]:

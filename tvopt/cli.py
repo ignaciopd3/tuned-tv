@@ -13,6 +13,7 @@ from pathlib import Path
 from tvopt import __version__
 from tvopt.adb.client import Adb, AdbError
 from tvopt.android_tv import perf
+from tvopt.core.i18n import language, localize_argparse, tr
 from tvopt.core.profile import PROFILE_ID_RE, ProfileError, load_env
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,7 +35,7 @@ def motor(args: list[str]) -> int:
 def medir(profile_id: str, serial: str | None) -> int:
     """Mide el rendimiento de la tele sin tocar nada, guarda el informe y lo compara con la medida anterior."""
     if not PROFILE_ID_RE.match(profile_id):
-        print(f"Nombre de perfil inválido: {profile_id}", file=sys.stderr)
+        print(tr("Nombre de perfil inválido: {profile}", profile=profile_id), file=sys.stderr)
         return 2
     profile_dir = profiles_dir() / profile_id
     try:
@@ -44,7 +45,7 @@ def medir(profile_id: str, serial: str | None) -> int:
         return e.exit_code
     serial = serial or os.environ.get("TV_SERIAL")
     if not serial:
-        print("Indica la tele con --serial <ip:puerto> o la variable TV_SERIAL", file=sys.stderr)
+        print(tr("Indica la tele con --serial <ip:puerto> o la variable TV_SERIAL"), file=sys.stderr)
         return 2
     try:
         adb = Adb(serial)
@@ -52,7 +53,12 @@ def medir(profile_id: str, serial: str | None) -> int:
         got = adb.shell(f"getprop {env['MATCH_PROP']}").strip()
         if got != env["MATCH_VALUE"]:
             print(
-                f"La tele no coincide con el perfil: {env['MATCH_PROP']}='{got}' (esperado '{env['MATCH_VALUE']}')",
+                tr(
+                    "La tele no coincide con el perfil: {prop}='{got}' (esperado '{want}')",
+                    prop=env["MATCH_PROP"],
+                    got=got,
+                    want=env["MATCH_VALUE"],
+                ),
                 file=sys.stderr,
             )
             return 3
@@ -74,10 +80,10 @@ def medir(profile_id: str, serial: str | None) -> int:
     print(markdown)
     if previous:
         before = perf.from_json(previous[-1].read_text(encoding="utf-8"))
-        print(f"Comparado con la medida anterior ({previous[-1].stem}):")
+        print(tr("Comparado con la medida anterior ({stamp}):", stamp=previous[-1].stem))
         for line in perf.compare(before, report):
             print(f"  {line}")
-    print(f"\nGuardado en {out_dir / stamp}.md")
+    print("\n" + tr("Guardado en {path}", path=f"{out_dir / stamp}.md"))
     return 0
 
 
@@ -89,18 +95,18 @@ def launcher(profile_id: str, build_only: bool, force: bool) -> int:
     log = Log()
     try:
         if not PROFILE_ID_RE.match(profile_id):
-            raise Fail(2, f"Nombre de perfil inválido: {profile_id}")
+            raise Fail(2, tr("Nombre de perfil inválido: {profile}", profile=profile_id))
         launcher_dir = profiles_dir() / profile_id / "launcher"
         stock = theme.stock_home(launcher_dir)  # valida config.json antes de compilar
         src = source.Source.load(SHARED_LAUNCHER)
         cyt = Path(os.environ.get("CYT_DIR") or ROOT.parent / "cleanyourtv")
         apks = source.apks(src, cyt, profile_id, log, source.default_cache(), force=force)
         if build_only:
-            log.ok("Compilado (sin instalar)")
+            log.ok(tr("Compilado (sin instalar)"))
             return 0
         serial = os.environ.get("TV_SERIAL")
         if not serial:
-            raise Fail(2, "Define TV_SERIAL (ip:puerto)")
+            raise Fail(2, tr("Define TV_SERIAL (ip:puerto)"))
         adb = Adb(serial, warn=log.warn)
         adb.connect()
         wanted = {pkg: apks[name] for name, pkg in src.addons}
@@ -110,7 +116,7 @@ def launcher(profile_id: str, build_only: bool, force: bool) -> int:
         theme.apply(adb, launcher_dir, cyt, log, force=force, shared=SHARED_LAUNCHER)
         if theme.config(launcher_dir).get("restore_key_services") is True:
             device.keep_alive(adb, log)
-        log.ok(f"Launcher, complementos y tema del perfil {profile_id} al día")
+        log.ok(tr("Launcher, complementos y tema del perfil {profile} al día", profile=profile_id))
         return 0
     except Fail as e:
         log.error(str(e))
@@ -120,18 +126,48 @@ def launcher(profile_id: str, build_only: bool, force: bool) -> int:
         return 1
 
 
+def _names(spanish: str, english: str) -> tuple[str, str]:
+    """Las dos formas de una opción valen siempre; la ayuda enseña primero la del idioma de quien la lee."""
+    return (english, spanish) if language() == "en" else (spanish, english)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="run.py", description="tv-opt: conectar, limpiar y optimizar teles")
+    localize_argparse()
+    parser = argparse.ArgumentParser(prog="run.py", description=tr("tv-opt: conectar, limpiar y optimizar teles"))
     parser.add_argument("--version", action="version", version=f"tv-opt {__version__}")
-    sub = parser.add_subparsers(dest="orden", required=True, metavar="orden")
-    sub.add_parser("motor", help="el motor: foto, auditoría, plan, aplicar y deshacer (motor --help)")
-    measure = sub.add_parser("medir", help="mide el rendimiento de la tele sin tocar nada")
-    measure.add_argument("--perfil", required=True, help="perfil de la tele (carpeta de profiles/)")
-    measure.add_argument("--serial", help="ip:puerto de la tele (por defecto, la variable TV_SERIAL)")
-    lch = sub.add_parser("launcher", help="compila (con caché) e instala el launcher, los complementos y el tema")
-    lch.add_argument("--perfil", required=True, help="perfil de la tele (carpeta de profiles/)")
-    lch.add_argument("--solo-compilar", action="store_true", help="compila sin tocar la tele")
-    lch.add_argument("--forzar", action="store_true", help="recompila y reinstala aunque no haya cambios")
+    sub = parser.add_subparsers(dest="orden", required=True, metavar=tr("orden"))
+    sub.add_parser(
+        "motor", aliases=["engine"], help=tr("el motor: foto, auditoría, plan, aplicar y deshacer (motor --help)")
+    )
+    measure = sub.add_parser("medir", aliases=["measure"], help=tr("mide el rendimiento de la tele sin tocar nada"))
+    measure.add_argument(
+        *_names("--perfil", "--profile"),
+        dest="perfil",
+        metavar=tr("PERFIL"),
+        required=True,
+        help=tr("perfil de la tele (carpeta de profiles/)"),
+    )
+    measure.add_argument("--serial", help=tr("ip:puerto de la tele (por defecto, la variable TV_SERIAL)"))
+    lch = sub.add_parser("launcher", help=tr("compila (con caché) e instala el launcher, los complementos y el tema"))
+    lch.add_argument(
+        *_names("--perfil", "--profile"),
+        dest="perfil",
+        metavar=tr("PERFIL"),
+        required=True,
+        help=tr("perfil de la tele (carpeta de profiles/)"),
+    )
+    lch.add_argument(
+        *_names("--solo-compilar", "--build-only"),
+        dest="solo_compilar",
+        action="store_true",
+        help=tr("compila sin tocar la tele"),
+    )
+    lch.add_argument(
+        *_names("--forzar", "--force"),
+        dest="forzar",
+        action="store_true",
+        help=tr("recompila y reinstala aunque no haya cambios"),
+    )
     return parser
 
 
@@ -145,11 +181,11 @@ def _utf8_output() -> None:
 def main(argv: list[str] | None = None) -> int:
     _utf8_output()
     args = sys.argv[1:] if argv is None else argv
-    if args[:1] == ["motor"]:
+    if args[:1] in (["motor"], ["engine"]):
         # Todo lo que sigue es del motor, también --help: argparse no debe interpretarlo.
         return motor(args[1:])
     parsed = build_parser().parse_args(args)
-    if parsed.orden == "medir":
+    if parsed.orden in ("medir", "measure"):
         return medir(parsed.perfil, parsed.serial)
     if parsed.orden == "launcher":
         return launcher(parsed.perfil, parsed.solo_compilar, parsed.forzar)

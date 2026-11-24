@@ -47,7 +47,7 @@ Tuned TV switches it off with the TV's own developer tools, one reviewed step at
   refuses to touch them.
 - **Privacy settings.** Ad tracking limited, usage reports off, ACR off where it can be. Optionally, a private DNS that
   blocks ads and trackers for the whole TV.
-- **Faster, measured.** `medir` (measure) records CPU, memory, swap and the busiest processes at idle, before and
+- **Faster, measured.** `measure` records CPU, memory, swap and the busiest processes at idle, before and
   after, so you see what each change bought.
 - **A clean home screen** (optional), built from [cleanyourtv](https://github.com/Gathin23/cleanyourtv)'s launcher
   with Tuned TV's patches: no suggestions or ads, your apps in your order, a clock, weather and remote buttons that
@@ -127,20 +127,20 @@ uv sync
    ```
 3. **Measure first**, with the TV idle at its home screen:
    ```bash
-   uv run run.py medir --perfil <profile>
+   uv run run.py measure --profile <profile>
    ```
 4. **See the plan.** Nothing changes yet:
    ```bash
-   uv run run.py motor --profile <profile> --action all --dry-run
+   uv run run.py engine --profile <profile> --action all --dry-run
    ```
 5. **Apply it** when you agree with the plan, then measure again:
    ```bash
-   uv run run.py motor --profile <profile> --action all
-   uv run run.py medir --perfil <profile>
+   uv run run.py engine --profile <profile> --action all
+   uv run run.py measure --profile <profile>
    ```
 6. **Undo** at any time:
    ```bash
-   uv run run.py motor --profile <profile> --action rollback --all
+   uv run run.py engine --profile <profile> --action rollback --all
    ```
 
 Actions: `audit` (read only), `debloat`, `optimize` (settings, app permissions, log levels), `remap` (remote
@@ -152,7 +152,7 @@ without it.
 
 ## The launcher
 
-`uv run run.py launcher --perfil <profile>` builds the clean home screen and installs it, with its add-ons and the
+`uv run run.py launcher --profile <profile>` builds the clean home screen and installs it, with its add-ons and the
 profile's theme (`profiles/<profile>/launcher/config.json`). It is cached, so it only rebuilds when the patches change,
 and it waits until the TV's home screen is in front before installing.
 
@@ -204,10 +204,11 @@ that were disabled on that model without side effects, and the riskier ones wait
 </details>
 
 <details>
-<summary><b>Why does the tool say "medir" and "motor"?</b></summary>
+<summary><b>Why do I see "medir" and "motor"?</b></summary>
 
-The project started in Spanish: `medir` means measure and `motor` means engine. The code and its comments are still in
-Spanish; the documentation is in both languages.
+The project started in Spanish: `medir` means measure and `motor` means engine. Both names work (`run.py measure`,
+`run.py engine`, `--profile`, `--build-only`, `--force`), and the tool talks in your system's language, English or
+Spanish (set `TVOPT_LANG=en` or `es` to choose). The code comments are still in Spanish.
 </details>
 
 ## Contributing

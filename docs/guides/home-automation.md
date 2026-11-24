@@ -69,7 +69,7 @@ Also:
    "app_keys": ["KEYCODE_PROG_YELLOW:io.github.ignaciopd3.casa/.LuzActivity"]
    ```
    `app_keys` is optional: here the yellow button switches the light. For the heater, `.CalefactorActivity`. Then
-   `uv run run.py launcher --perfil <profile>`.
+   `uv run run.py launcher --profile <profile>`.
 5. **Try the alerts** without opening the real door:
    ```bash
    adb shell am start -n io.github.ignaciopd3.casa/.ImportActivity --es simulate puerta   # or sigue, cerrada

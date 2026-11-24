@@ -45,7 +45,7 @@ ignore`).
 
 ## Results
 
-Measured at idle with `run.py medir`:
+Measured at idle with `run.py measure`:
 
 | | Before | After |
 |---|---|---|
@@ -103,7 +103,7 @@ adb shell 'settings put secure accessibility_enabled 0; settings put secure enab
 Updating a system app turns it back on, and Amazon's updater (protected) does so now and then. Check every few weeks:
 
 ```bash
-uv run run.py motor --profile fire-tv-4k-max-aftka --action all --dry-run
+uv run run.py engine --profile fire-tv-4k-max-aftka --action all --dry-run
 ```
 
 If the plan is not empty, run it again without `--dry-run`.
@@ -112,11 +112,11 @@ If the plan is not empty, run it again without `--dry-run`.
 
 ```bash
 export TV_SERIAL=<tv-ip>:5555
-uv run run.py medir --perfil fire-tv-4k-max-aftka
-uv run run.py motor --profile fire-tv-4k-max-aftka --action all --dry-run
-uv run run.py motor --profile fire-tv-4k-max-aftka --action all
-uv run run.py launcher --perfil fire-tv-4k-max-aftka        # optional: the clean home
-uv run run.py motor --profile fire-tv-4k-max-aftka --action rollback --all   # back to how it came
+uv run run.py measure --profile fire-tv-4k-max-aftka
+uv run run.py engine --profile fire-tv-4k-max-aftka --action all --dry-run
+uv run run.py engine --profile fire-tv-4k-max-aftka --action all
+uv run run.py launcher --profile fire-tv-4k-max-aftka        # optional: the clean home
+uv run run.py engine --profile fire-tv-4k-max-aftka --action rollback --all   # back to how it came
 ```
 
 ## Credits

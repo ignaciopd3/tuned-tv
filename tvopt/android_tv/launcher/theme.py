@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import cast
 
 from tvopt.adb.client import Adb
+from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 
 PKG = "com.gathin.tvhome"
@@ -46,13 +47,13 @@ def config(theme_dir: Path) -> dict[str, object]:
     """config.json del perfil, validado: un objeto JSON de claves del tema."""
     path = theme_dir / "config.json"
     if not path.is_file():
-        raise Fail(2, f"No hay config.json en {theme_dir}")
+        raise Fail(2, tr("No hay config.json en {path}", path=theme_dir))
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except ValueError as e:
-        raise Fail(2, f"{path} no es JSON válido") from e
+        raise Fail(2, tr("{path} no es JSON válido", path=path)) from e
     if not isinstance(data, dict):
-        raise Fail(2, f"{path} no es un objeto JSON de claves del tema: el launcher lo ignoraría")
+        raise Fail(2, tr("{path} no es un objeto JSON de claves del tema: el launcher lo ignoraría", path=path))
     return cast("dict[str, object]", data)
 
 
@@ -78,7 +79,9 @@ def files(theme_dir: Path, shared: Path | None = None) -> dict[str, Path]:
         for image in sorted(walls.iterdir()):
             if image.is_file() and _IMAGE_RE.search(image.name):
                 if not _NAME_RE.match(image.name) or ".." in image.name:
-                    raise Fail(2, f"Nombre de fondo no admitido: {image.name} (letras, cifras, «.», «_» y «-»)")
+                    raise Fail(
+                        2, tr("Nombre de fondo no admitido: {name} (letras, cifras, «.», «_» y «-»)", name=image.name)
+                    )
                 found[f"wallpapers/{image.name}"] = image
         if (walls / "captions.txt").is_file():
             found["wallpapers/captions.txt"] = walls / "captions.txt"
@@ -130,20 +133,20 @@ def apply(adb: Adb, theme_dir: Path, cyt: Path, log: Log, force: bool = False, s
     names = list(local)
     pending = names if force else changed(local, parse_remote(adb.batch(remote_sections(names)), names))
     if not pending:
-        log.ok("El tema de la tele ya es este: no se envía nada")
+        log.ok(tr("El tema de la tele ya es este: no se envía nada"))
         return False
     adb.shell(f"mkdir -p {DIR}")
     for name in pending:
         if not adb.push(local[name], stage(name)):
-            raise Fail(1, f"No se pudo subir {name}")
+            raise Fail(1, tr("No se pudo subir {name}", name=name))
     script = "; ".join(put(name) for name in pending)
     revision = uuid.uuid4().hex
     script += f"; printf '%s' '{revision}' > {stage('theme_revision')}; {put('theme_revision')}"
     out = adb.shell(script, timeout=300)
     failed = [line for line in out.splitlines() if line.startswith(NOT_WRITTEN)]
     if failed:
-        raise Fail(1, f"La tele no aceptó {', '.join(f.split(' ', 1)[1] for f in failed)}")
-    log.ok(f"Tema enviado: {len(pending)} de {len(names)} archivos (los demás ya estaban)")
+        raise Fail(1, tr("La tele no aceptó {names}", names=", ".join(f.split(" ", 1)[1] for f in failed)))
+    log.ok(tr("Tema enviado: {sent} de {total} archivos (los demás ya estaban)", sent=len(pending), total=len(names)))
     restart_home(adb, cyt, log)
     return True
 
@@ -153,9 +156,9 @@ def restart_home(adb: Adb, cyt: Path, log: Log) -> None:
     tools = cyt / "tools"
     python = tools / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     if not python.is_file():
-        raise Fail(1, f"Falta el entorno de cleanyourtv ({python}): el tema sale al reiniciar el inicio")
+        raise Fail(1, tr("Falta el entorno de cleanyourtv ({path}): el tema sale al reiniciar el inicio", path=python))
     env = {**os.environ, "TV_HOST": adb.serial.split(":")[0], "TV_ADB_BINARY": adb.command[0]}
     result = subprocess.run([str(python), "-I", "theme_restart.py"], cwd=tools, env=env, check=False)
     if result.returncode != 0:
-        raise Fail(1, "El inicio no se reinició tras el tema: lo cogerá la próxima vez que arranque")
-    log.ok("Inicio reiniciado con el tema")
+        raise Fail(1, tr("El inicio no se reinició tras el tema: lo cogerá la próxima vez que arranque"))
+    log.ok(tr("Inicio reiniciado con el tema"))

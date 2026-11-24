@@ -15,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 
 _ADDON_RE = re.compile(r"^[a-z0-9-]+$")
@@ -34,11 +35,11 @@ class Source:
     def load(cls, launcher_dir: Path) -> Source:
         base = launcher_dir / "patches" / "BASE"
         if not base.is_file():
-            raise Fail(2, f"Falta launcher/patches/BASE ({base})")
+            raise Fail(2, tr("Falta launcher/patches/BASE ({path})", path=base))
         base_line = base.read_text(encoding="utf-8").strip()
         parts = base_line.split()
         if len(parts) != 2:
-            raise Fail(2, f"{base}: se espera «url commit»")
+            raise Fail(2, tr("{path}: se espera «url commit»", path=base))
         addons_file = launcher_dir / "patches" / "ADDONS"
         addons_text = addons_file.read_text(encoding="utf-8") if addons_file.is_file() else ""
         addons: list[tuple[str, str]] = []
@@ -47,7 +48,7 @@ class Source:
             if not fields:
                 continue
             if len(fields) != 2 or not _ADDON_RE.match(fields[0]) or not _PKG_RE.match(fields[1]):
-                raise Fail(2, f"{addons_file}:{n}: se espera «carpeta paquete»")
+                raise Fail(2, tr("{where}: se espera «carpeta paquete»", where=f"{addons_file}:{n}"))
             addons.append((fields[0], fields[1]))
         patches = tuple(sorted((launcher_dir / "patches").glob("*.patch")))
         return cls(parts[0], parts[1], patches, tuple(addons), base_line, addons_text)
@@ -107,21 +108,35 @@ def checkout(src: Source, cyt: Path, profile_id: str, log: Log) -> None:
     if not (cyt / ".git").is_dir():
         cyt.parent.mkdir(parents=True, exist_ok=True)
         if subprocess.run(["git", "clone", "-q", src.url, str(cyt)], check=False).returncode != 0:
-            raise Fail(1, f"No se pudo clonar {src.url}")
+            raise Fail(1, tr("No se pudo clonar {url}", url=src.url))
     if _git(cyt, "cat-file", "-e", f"{src.commit}^{{commit}}").returncode != 0:
         _git(cyt, "fetch", "-q", "origin")
     if _git(cyt, "checkout", "-q", "-B", f"tv-opt-{profile_id}", src.commit).returncode != 0:
-        raise Fail(1, f"No se pudo poner cleanyourtv en {src.commit}")
+        raise Fail(1, tr("No se pudo poner cleanyourtv en {commit}", commit=src.commit))
     applied = _git(cyt, "am", "-q", *(str(p) for p in src.patches))
     if applied.returncode != 0:
         _git(cyt, "am", "--abort")
-        raise Fail(1, f"Los parches no aplican sobre {src.commit}: {applied.stderr.strip()[:300]}")
-    log.ok(f"cleanyourtv en {src.commit} con {len(src.patches)} parches (rama tv-opt-{profile_id})")
+        raise Fail(
+            1,
+            tr(
+                "Los parches no aplican sobre {commit}: {detail}",
+                commit=src.commit,
+                detail=applied.stderr.strip()[:300],
+            ),
+        )
+    log.ok(
+        tr(
+            "cleanyourtv en {commit} con {count} parches (rama tv-opt-{profile})",
+            commit=src.commit,
+            count=len(src.patches),
+            profile=profile_id,
+        )
+    )
 
 
 def build(cyt: Path, module_dir: str, log: Log) -> Path:
     """Compila y prueba un módulo (launcher o addons/<x>) y devuelve su APK firmado."""
-    log.info(f"Compilando {module_dir}")
+    log.info(tr("Compilando {module}", module=module_dir))
     folder = cyt / module_dir
     props = folder / "local.properties"
     sdk = os.environ.get("ANDROID_HOME", "")
@@ -135,7 +150,7 @@ def build(cyt: Path, module_dir: str, log: Log) -> Path:
     )
     apk = folder / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
     if result.returncode != 0 or not apk.is_file():
-        raise Fail(1, f"Falló la compilación de {module_dir}")
+        raise Fail(1, tr("Falló la compilación de {module}", module=module_dir))
     return apk
 
 
@@ -145,12 +160,12 @@ def apks(src: Source, cyt: Path, profile_id: str, log: Log, cache: ApkCache, for
     if not force:
         cached = cache.get(fingerprint, src.modules())
         if cached is not None:
-            log.ok(f"APK en caché ({fingerprint}): no hace falta compilar")
+            log.ok(tr("APK en caché ({fingerprint}): no hace falta compilar", fingerprint=fingerprint))
             return cached
     checkout(src, cyt, profile_id, log)
     built = {"launcher": build(cyt, "launcher", log)}
     for name, _pkg in src.addons:
         built[name] = build(cyt, f"addons/{name}", log)
     saved = cache.put(fingerprint, built)
-    log.ok(f"Compilado y guardado en caché ({fingerprint})")
+    log.ok(tr("Compilado y guardado en caché ({fingerprint})", fingerprint=fingerprint))
     return saved

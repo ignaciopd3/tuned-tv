@@ -15,15 +15,17 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from tvopt.core.i18n import N_, localize_argparse, tr
+
 Rule = tuple[str, re.Pattern[bytes]]
 
 _EMAIL = re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 _EMAIL_OK = re.compile(rb"(?:@users\.noreply\.github\.com|@example\.(?:com|org|net)|^noreply@anthropic\.com)$")
 _PRIVATE_IP = re.compile(rb"\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b")
 _SECRETS: tuple[Rule, ...] = (
-    ("token de GitHub", re.compile(rb"\b(?:ghp|gho|ghu|ghs)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{40,}")),
-    ("clave de AWS", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
-    ("clave privada", re.compile(rb"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----")),
+    (N_("token de GitHub"), re.compile(rb"\b(?:ghp|gho|ghu|ghs)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{40,}")),
+    (N_("clave de AWS"), re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
+    (N_("clave privada"), re.compile(rb"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----")),
 )
 _NEVER = re.compile(r"(?:^|/)(?:backups/|\.env$|[^/]*\.(?:keystore|jks|p12)$)")
 _DEVICE_OUTPUT = "tests/fixtures/"  # salidas reales de la tele: nombres de servicios con «@» que no son correos
@@ -39,7 +41,7 @@ class Finding:
 
     def __str__(self) -> str:
         where = self.path if self.line == 0 else f"{self.path}:{self.line}"
-        return f"{where}: {self.rule}: {self.text}"
+        return f"{where}: {tr(self.rule)}: {self.text}"
 
 
 def _clip(raw: bytes) -> str:
@@ -57,7 +59,7 @@ def scan(files: Mapping[str, bytes], extra: Iterable[Rule] = ()) -> list[Finding
     for path in sorted(files):
         data = files[path]
         if _NEVER.search(path):
-            found.append(Finding(path, 0, "archivo que no se comparte", path))
+            found.append(Finding(path, 0, N_("archivo que no se comparte"), path))
         found.extend(Finding(path, 0, name, path) for name, rule in own if rule.search(path.encode()))
         if b"\0" in data[:8192]:
             continue  # binario: imágenes, APK
@@ -70,14 +72,14 @@ def scan(files: Mapping[str, bytes], extra: Iterable[Rule] = ()) -> list[Finding
                     found.append(Finding(path, n, name, _clip(hit.group(0))))
             if generic:
                 found.extend(
-                    Finding(path, n, "correo", _clip(m.group(0)))
+                    Finding(path, n, N_("correo"), _clip(m.group(0)))
                     for m in _EMAIL.finditer(line)
                     if not _EMAIL_OK.search(m.group(0))
                 )
             if ips:
                 hit = _PRIVATE_IP.search(line)
                 if hit:
-                    found.append(Finding(path, n, "IP privada", _clip(hit.group(0))))
+                    found.append(Finding(path, n, N_("IP privada"), _clip(hit.group(0))))
     return found
 
 
@@ -102,15 +104,19 @@ def _tracked() -> dict[str, bytes]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="privacy", description="Busca datos privados en los archivos del repo")
-    parser.add_argument("--rules", type=Path, help="reglas propias, una expresión regular por línea")
+    localize_argparse()
+    parser = argparse.ArgumentParser(prog="privacy", description=tr("Busca datos privados en los archivos del repo"))
+    parser.add_argument("--rules", type=Path, help=tr("reglas propias, una expresión regular por línea"))
     args = parser.parse_args(argv)
     rules_path: Path | None = args.rules
     extra = load_rules(rules_path) if rules_path else []
     found = scan(_tracked(), extra)
     for finding in found:
         print(finding)
-    print("Sin datos privados" if not found else f"{len(found)} posibles datos privados", file=sys.stderr)
+    print(
+        tr("Sin datos privados") if not found else tr("{count} posibles datos privados", count=len(found)),
+        file=sys.stderr,
+    )
     return 1 if found else 0
 
 
