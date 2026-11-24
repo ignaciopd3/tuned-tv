@@ -19,6 +19,21 @@ Measure the difference, and undo everything whenever you want. No root, nothing 
 
 ---
 
+## How it looks
+
+<p align="center">
+  <img src="docs/images/inicio.jpg" width="49%" alt="Clean home screen on a TCL C845: date, time and weather at the top, and a dock with live TV, YouTube, Netflix, Prime Video and Spotify over a mountain lake">
+  <img src="docs/images/reloj.jpg" width="49%" alt="Idle clock: time, date and weather over the same landscape">
+</p>
+
+Real screenshots of a TCL C845 with the example profile: your apps in your order, time and weather, and not a single
+suggestion or ad. After a few minutes without touching the remote the clock on the right appears, and the wallpapers
+keep changing. The red "ADB abierto" (ADB open) warning only shows while debugging is on. The TV's language here is
+Spanish; the home screen follows yours.
+
+<sub>Wallpaper: "Lake Mystery, Canterbury, New Zealand" by Michal Klajban, CC BY-SA 4.0 (see
+[launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+
 ## Why
 
 Smart TVs ship with apps nobody asked for. Many also report what you watch, including what comes in over HDMI (ACR),
@@ -37,6 +52,8 @@ Tuned TV switches it off with the TV's own developer tools, one reviewed step at
 - **A clean home screen** (optional), built from [cleanyourtv](https://github.com/Gathin23/cleanyourtv)'s launcher
   with Tuned TV's patches: no suggestions or ads, your apps in your order, a clock, weather and remote buttons that
   do what you want. On Fire TV it even takes over the Home button, which Fire OS normally keeps to itself.
+- **Terrestrial channels in order.** Tune and sort channels your way, with each channel's best version on its number:
+  UHD if your TV supports it, HD if not. You decide. [How](docs/guides/channels.md).
 - **Per-model profiles.** Each TV model gets a folder with its lists, settings and notes, so the next person with that
   model starts from a tested setup. [Add yours](CONTRIBUTING.md).
 

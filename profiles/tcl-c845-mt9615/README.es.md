@@ -134,8 +134,9 @@ Después, `--action rollback` del run que deshabilitó `setupwraith`.
   deshabilitar `com.tcl.ttvs`.
 - **Wifi:** esta tele usa el dominio de España y Europa. En 5 GHz, mejor un canal fijo entre 36, 40, 44 y 48 a 80 MHz.
   En los canales DFS (52–144) el router cambia de canal cuando detecta un radar, y la tele pierde la red.
-- **Orden de los canales:** `tools/tcl_channels.py` ordena la TDT a partir de un `channels.txt` en el perfil, un nombre
-  por línea (`!` oculta uno). Las listas dependen de la región, así que este perfil no trae ninguna.
+- **Orden de los canales:** `tools/tcl_channels.py` ordena la TDT a partir de un `channels.txt`, un nombre por línea
+  (`!` oculta uno). Las listas dependen de la región, así que este perfil no trae ninguna. Esta tele admite los canales
+  UHD (DVB-T2 con HEVC). Ver la [guía de canales](../../docs/guides/channels.es.md).
 
 ## Uso
 

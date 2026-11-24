@@ -19,6 +19,20 @@ Mide la diferencia y deshazlo todo cuando quieras. Sin root y sin desinstalar na
 
 ---
 
+## Cómo queda
+
+<p align="center">
+  <img src="docs/images/inicio.jpg" width="49%" alt="Inicio limpio en una TCL C845: fecha, hora y tiempo arriba, y un dock con TDT, YouTube, Netflix, Prime Video y Spotify sobre un lago de montaña">
+  <img src="docs/images/reloj.jpg" width="49%" alt="Reloj de reposo: hora, fecha y tiempo sobre el mismo paisaje">
+</p>
+
+Capturas reales de una TCL C845 con el perfil de ejemplo: tus apps en tu orden, la hora y el tiempo, y ni una sugerencia
+ni un anuncio. Tras unos minutos sin tocar el mando sale el reloj de la derecha, y los fondos van cambiando. El aviso
+rojo «ADB abierto» solo sale mientras la depuración está activada.
+
+<sub>Fondo: «Lake Mystery, Canterbury, New Zealand» de Michal Klajban, CC BY-SA 4.0 (ver
+[launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+
 ## Por qué
 
 Las smart TV traen apps que nadie ha pedido. Muchas, además, informan de lo que ves, también de lo que entra por HDMI
@@ -37,6 +51,8 @@ Tuned TV lo apaga con las herramientas de desarrollo de la propia tele, paso a p
 - **Un inicio limpio** (opcional), hecho a partir del launcher de [cleanyourtv](https://github.com/Gathin23/cleanyourtv)
   con los parches de Tuned TV: sin sugerencias ni anuncios, tus apps en tu orden, reloj, tiempo y botones del mando que
   hacen lo que quieres. En Fire TV se queda incluso con el botón de inicio, que Fire OS normalmente se reserva.
+- **Canales de la TDT en orden.** Sintoniza y ordena los canales a tu gusto, con la mejor versión de cada uno en su
+  número: la UHD si tu tele la admite, la HD si no. Tú decides. [Cómo](docs/guides/channels.es.md).
 - **Perfiles por modelo.** Cada modelo de tele tiene su carpeta con sus listas, ajustes y notas, para que el siguiente
   con ese modelo empiece desde algo probado. [Añade el tuyo](CONTRIBUTING.es.md).
 

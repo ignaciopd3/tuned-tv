@@ -127,8 +127,9 @@ Then run `--action rollback` for the run that disabled `setupwraith`.
 - **Firmware updates:** look for one in Settings → System → About → System update before disabling `com.tcl.ttvs`.
 - **Wi-Fi:** this TV uses the Spanish/European domain. In 5 GHz, prefer a fixed channel among 36, 40, 44 and 48 at
   80 MHz. DFS channels (52–144) force the router to jump channels when it detects radar, and the TV drops the network.
-- **Channel order:** `tools/tcl_channels.py` sorts DTT channels from a `channels.txt` in the profile, one name per
-  line (`!` hides one). Lists depend on the region, so this profile ships none.
+- **Channel order:** `tools/tcl_channels.py` sorts terrestrial channels from a `channels.txt`, one name per line (`!`
+  hides one). Lists depend on the region, so this profile ships none. This TV supports UHD channels (DVB-T2 with
+  HEVC). See the [channels guide](../../docs/guides/channels.md).
 
 ## Use
 
