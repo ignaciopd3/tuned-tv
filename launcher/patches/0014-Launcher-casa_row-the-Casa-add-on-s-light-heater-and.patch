@@ -1,7 +1,7 @@
-From 89aa83c4ac68f0fb3faa910667b16fd61853a750 Mon Sep 17 00:00:00 2001
+From da708c2c96f450a92ed1af08831d211050c6d43b Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 11:11:59 +0100
-Subject: [PATCH 14/24] Launcher: casa_row, the Casa add-on's light, heater and
+Subject: [PATCH 14/26] Launcher: casa_row, the Casa add-on's light, heater and
  climate under the top bar
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

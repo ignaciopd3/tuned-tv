@@ -1,7 +1,7 @@
-From 83bc3d764f2471c3477518872d1de1b3f441be20 Mon Sep 17 00:00:00 2001
+From 6f4e50cd93b03aa4283b2e0800188153ee158be3 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Tue, 24 Nov 2026 08:22:15 +0100
-Subject: [PATCH 23/24] launch_actions: "activity:.Screen" opens that screen of
+Subject: [PATCH 23/26] launch_actions: "activity:.Screen" opens that screen of
  the app (the Fire TV Appstore's store front)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

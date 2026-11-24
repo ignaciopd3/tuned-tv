@@ -1,0 +1,108 @@
+From 97e5f0fed298aa2f18e856765e10f066e599c0e4 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 23:26:16 +0100
+Subject: [PATCH 26/26] weather_app: a copy written in another language is
+ fetched again
+
+The weather row is stored as ready-to-show text, so after the TV's language changed it kept the old language for up
+to half an hour (until the next refresh). The copy now records its language, and one in another language is fetched
+again on the next read, in the TV's language; only a try that failed a moment ago (offline) makes it wait RETRY_MS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../sumyabazar1/weather/NowProvider.java      |  5 ++++-
+ .../github/sumyabazar1/weather/NowText.java   |  6 ++++-
+ .../sumyabazar1/weather/NowTextTest.java      | 22 +++++++++++++------
+ 3 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
+index f497ab9..4092cfb 100644
+--- a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
++++ b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowProvider.java
+@@ -43,7 +43,9 @@ public final class NowProvider extends ContentProvider {
+         long lon = place.getLong("lon", 0);
+         SharedPreferences now = ctx.getSharedPreferences("now", Context.MODE_PRIVATE);
+         boolean sameCity = now.contains("lat") && now.getLong("lat", 0) == lat && now.getLong("lon", 0) == lon;
+-        if (NowText.needsFetch(System.currentTimeMillis(), now.getLong("fetched", 0), now.getLong("tried", 0), sameCity)) {
++        boolean sameLanguage = Locale.getDefault().toLanguageTag().equals(now.getString("lang", ""));
++        if (NowText.needsFetch(System.currentTimeMillis(), now.getLong("fetched", 0), now.getLong("tried", 0), sameCity,
++                sameLanguage)) {
+             fetch(ctx, now, lat, lon);
+         }
+         if (sameCity) {
+@@ -66,6 +68,7 @@ public final class NowProvider extends ContentProvider {
+                         .putLong("lat", lat)
+                         .putLong("lon", lon)
+                         .putLong("fetched", System.currentTimeMillis())
++                        .putString("lang", Locale.getDefault().toLanguageTag())
+                         .putString("temp", Forecast.degrees(r.tempC, f) + "°")
+                         .putString("summary", res.getString(Forecast.sky(r.code, r.day)) + " · "
+                                 + res.getString(R.string.feels_like, Forecast.degrees(r.feelsC, f)))
+diff --git a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
+index ab7c69a..6500ce9 100644
+--- a/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
++++ b/addons/weather/app/src/main/java/io/github/sumyabazar1/weather/NowText.java
+@@ -27,8 +27,12 @@ final class NowText {
+      * {@link Forecast#REFRESH_MS} (or from a clock that went back), and not again within {@link Forecast#RETRY_MS}
+      * of the last try, so an offline TV is not asked on every return to Home.
+      */
+-    static boolean needsFetch(long now, long fetchedMs, long lastTryMs, boolean sameCity) {
++    static boolean needsFetch(long now, long fetchedMs, long lastTryMs, boolean sameCity, boolean sameLanguage) {
+         if (!sameCity) return true;
++        boolean recentFailure = lastTryMs > fetchedMs && lastTryMs <= now && now - lastTryMs < Forecast.RETRY_MS;
++        // The text is stored ready to show: a copy written in another language is fetched again at once, unless the
++        // last try failed a moment ago (offline).
++        if (!sameLanguage) return !recentFailure;
+         boolean stale = fetchedMs <= 0 || fetchedMs > now || now - fetchedMs >= Forecast.REFRESH_MS;
+         return stale && (lastTryMs > now || now - lastTryMs >= Forecast.RETRY_MS);
+     }
+diff --git a/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java b/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
+index ac3981a..27cc367 100644
+--- a/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
++++ b/addons/weather/app/src/test/java/io/github/sumyabazar1/weather/NowTextTest.java
+@@ -37,27 +37,35 @@ public class NowTextTest {
+     @Test
+     public void fetchesWithoutCacheOrForAnotherCity() {
+         long now = 1_000 * MIN;
+-        assertTrue(NowText.needsFetch(now, 0, 0, true));
+-        assertTrue(NowText.needsFetch(now, now - MIN, now - MIN, false));
++        assertTrue(NowText.needsFetch(now, 0, 0, true, true));
++        assertTrue(NowText.needsFetch(now, now - MIN, now - MIN, false, true));
+     }
+ 
+     @Test
+     public void freshCacheIsServedAsIs() {
+         long now = 1_000 * MIN;
+-        assertFalse(NowText.needsFetch(now, now - 29 * MIN, now - 29 * MIN, true));
++        assertFalse(NowText.needsFetch(now, now - 29 * MIN, now - 29 * MIN, true, true));
+     }
+ 
+     @Test
+     public void staleCacheFetchesUnlessATryWasRecent() {
+         long now = 1_000 * MIN;
+-        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 31 * MIN, true));
+-        assertFalse(NowText.needsFetch(now, now - 31 * MIN, now - 2 * MIN, true));
+-        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 6 * MIN, true));
++        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 31 * MIN, true, true));
++        assertFalse(NowText.needsFetch(now, now - 31 * MIN, now - 2 * MIN, true, true));
++        assertTrue(NowText.needsFetch(now, now - 31 * MIN, now - 6 * MIN, true, true));
+     }
+ 
+     @Test
+     public void aClockThatWentBackCountsAsStale() {
+         long now = 1_000 * MIN;
+-        assertTrue(NowText.needsFetch(now, now + 60 * MIN, now + 60 * MIN, true));
++        assertTrue(NowText.needsFetch(now, now + 60 * MIN, now + 60 * MIN, true, true));
++    }
++
++    @Test
++    public void aCopyInAnotherLanguageIsFetchedAgainUnlessATryWasRecent() {
++        long now = 1_000 * MIN;
++        assertTrue(NowText.needsFetch(now, now - 2 * MIN, now - 2 * MIN - 1000, true, false));  // last try worked
++        assertFalse(NowText.needsFetch(now, now - 20 * MIN, now - 2 * MIN, true, false));       // offline a moment ago
++        assertTrue(NowText.needsFetch(now, now - 20 * MIN, now - 6 * MIN, true, false));        // offline, long ago
+     }
+ }
+-- 
+2.54.0.windows.1
+

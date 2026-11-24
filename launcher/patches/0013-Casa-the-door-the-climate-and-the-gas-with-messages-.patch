@@ -1,7 +1,7 @@
-From 236655ad5d8aae80b9e56ff526f7fc47860e771a Mon Sep 17 00:00:00 2001
+From 7fd178e005c4d3d65975a42120cfb4032f6db909 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 11:11:59 +0100
-Subject: [PATCH 13/24] Casa: the door, the climate and the gas, with messages
+Subject: [PATCH 13/26] Casa: the door, the climate and the gas, with messages
  over any channel
 
 A foreground service that reads the devices' status from Tuya's device-sharing

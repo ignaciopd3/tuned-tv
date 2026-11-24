@@ -22,17 +22,17 @@ Measure the difference, and undo everything whenever you want. No root, nothing 
 ## How it looks
 
 <p align="center">
-  <img src="docs/images/inicio.jpg" width="49%" alt="Clean home screen on a TCL C845: date, time and weather at the top, and a dock with live TV, YouTube, Netflix, Prime Video and Spotify over a mountain lake">
-  <img src="docs/images/reloj.jpg" width="49%" alt="Idle clock: time, date and weather over the same landscape">
+  <img src="docs/images/inicio.en.jpg" width="49%" alt="Clean home screen on a TCL C845: date, time and weather at the top, and a dock with live TV, YouTube, Netflix, Prime Video and Spotify over a waterfall">
+  <img src="docs/images/reloj.en.jpg" width="49%" alt="Idle clock: time, date and weather over the same landscape">
 </p>
 
 Real screenshots of a TCL C845 with the example profile: your apps in your order, time and weather, and not a single
 suggestion or ad. After a few minutes without touching the remote the clock on the right appears, and the wallpapers
-keep changing. The red "ADB abierto" (ADB open) warning only shows while debugging is on. The TV's language here is
-Spanish; the home screen follows yours.
+keep changing. The red "ADB open" warning only shows while debugging is on. Everything follows the TV's language:
+here English, and the same screen comes out in Spanish on a TV in Spanish.
 
-<sub>Wallpaper: "Lake Mystery, Canterbury, New Zealand" by Michal Klajban, CC BY-SA 4.0 (see
-[launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
+<sub>Wallpaper: "Kuang Si Falls and a turquoise water pool in Luang Prabang province Laos" by Basile Morin,
+CC BY-SA 4.0 (see [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
 
 ## Why
 

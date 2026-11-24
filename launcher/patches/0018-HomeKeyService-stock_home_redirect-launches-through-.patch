@@ -1,7 +1,7 @@
-From 35833dea142b31cec7eca911d35e62280fd26eed Mon Sep 17 00:00:00 2001
+From 7bf72034b3356d20de7b93c2e4bb456b95172de9 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Mon, 23 Nov 2026 20:03:11 +0100
-Subject: [PATCH 18/24] HomeKeyService: stock_home_redirect launches through an
+Subject: [PATCH 18/26] HomeKeyService: stock_home_redirect launches through an
  exact alarm under a cover
 
 Fire OS holds back app starts for 5 s after Home (APP_SWITCH_DELAY_TIME), so the

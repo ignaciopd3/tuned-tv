@@ -22,8 +22,8 @@ Mide la diferencia y deshazlo todo cuando quieras. Sin root y sin desinstalar na
 ## Cómo queda
 
 <p align="center">
-  <img src="docs/images/inicio.jpg" width="49%" alt="Inicio limpio en una TCL C845: fecha, hora y tiempo arriba, y un dock con TDT, YouTube, Netflix, Prime Video y Spotify sobre un lago de montaña">
-  <img src="docs/images/reloj.jpg" width="49%" alt="Reloj de reposo: hora, fecha y tiempo sobre el mismo paisaje">
+  <img src="docs/images/inicio.es.jpg" width="49%" alt="Inicio limpio en una TCL C845: fecha, hora y tiempo arriba, y un dock con TDT, YouTube, Netflix, Prime Video y Spotify sobre un lago de montaña">
+  <img src="docs/images/reloj.es.jpg" width="49%" alt="Reloj de reposo: hora, fecha y tiempo sobre el mismo paisaje">
 </p>
 
 Capturas reales de una TCL C845 con el perfil de ejemplo: tus apps en tu orden, la hora y el tiempo, y ni una sugerencia

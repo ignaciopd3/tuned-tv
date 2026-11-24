@@ -1,7 +1,7 @@
-From 2256a45d657b06970b20802cab5d8abd15f9916e Mon Sep 17 00:00:00 2001
+From 0df7bfd71f008fb5eaffa2e09904d8326db5861a Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 11:21:35 +0100
-Subject: [PATCH 15/24] Casa stays up through the launcher's binding, not as a
+Subject: [PATCH 15/26] Casa stays up through the launcher's binding, not as a
  foreground service
 
 TCL's TclAppBoot refuses startForeground to an app started in the background

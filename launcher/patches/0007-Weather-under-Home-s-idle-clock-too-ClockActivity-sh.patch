@@ -1,7 +1,7 @@
-From fe3f1711a35d0835b01b5e524ef2e7c2a5b277fa Mon Sep 17 00:00:00 2001
+From 64ca1c32b415cb681a045c2f7102d58f1ee61236 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 22:34:31 +0100
-Subject: [PATCH 07/24] Weather under Home's idle clock too (ClockActivity),
+Subject: [PATCH 07/26] Weather under Home's idle clock too (ClockActivity),
  sharing the screensaver's line
 
 home_idle_clock_minutes opens ClockActivity, which used the same dream_clock layout but

@@ -42,8 +42,10 @@ Tuned TV se apoya en estos proyectos. ¡Gracias!
 
 Landscape photos from [Wikimedia Commons](https://commons.wikimedia.org), each under its own licence, with author,
 licence, link and the changes made listed in [`launcher/CREDITS.md`](launcher/CREDITS.md). Adaptations of CC BY-SA
-pictures stay under CC BY-SA, and so do the README screenshots in [`docs/images/`](docs/images/), which show `004.jpg`
-("Lake Mystery, Canterbury, New Zealand 05" by Michal Klajban, CC BY-SA 4.0).
+pictures stay under CC BY-SA, and so do the README screenshots and graphics in [`docs/images/`](docs/images/), which
+show `004.jpg` ("Lake Mystery, Canterbury, New Zealand 05" by Michal Klajban), `012.jpg` ("Kuang Si Falls and a
+turquoise water pool in Luang Prabang province Laos" by Basile Morin) and crops of other wallpapers from that list,
+all CC BY-SA.
 
 ## Libraries used at run time (not bundled)
 

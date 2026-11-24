@@ -1,7 +1,7 @@
-From 348f9208fb1e38d8ab9452aff32e160d902fae04 Mon Sep 17 00:00:00 2001
+From e21f80b7f5d4f80a7ad6f5e087296cf09e9f57dc Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Mon, 23 Nov 2026 21:25:44 +0100
-Subject: [PATCH 19/24] GuardRevival puts the helpers back with
+Subject: [PATCH 19/26] GuardRevival puts the helpers back with
  restore_key_services; stock_home_redirect checks the front on connect
 
 On Fire OS Home is Amazon's, so after a force stop nothing started this launcher

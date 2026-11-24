@@ -1,0 +1,98 @@
+From 6a3e5683e7c82f607edd785cdcec62b48154136a Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 23:17:04 +0100
+Subject: [PATCH 25/26] casa_row: bind Casa again when Android ends the binding
+ (Casa updated or force-stopped)
+
+Updating Casa on its own, without the launcher, left Casa stopped on the Fire TV: Android ends a binding for good
+when the bound app is updated or force-stopped (onBindingDied), and the launcher kept believing it was bound until
+its own process restarted, so the door and gas alerts stopped. The connection now unbinds and binds again 3 s
+later, retrying for a minute at most while the new Casa finishes installing; a first bind that fails is released
+and not retried, as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../main/java/com/gathin/tvhome/CasaRow.java  | 52 ++++++++++++++-----
+ 1 file changed, 39 insertions(+), 13 deletions(-)
+
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+index 092038d..18d1bb8 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/CasaRow.java
+@@ -57,34 +57,60 @@ final class CasaRow {
+     /** Adds the row when Casa is installed and answers; null otherwise, and the top bar stays as it was. */
+     static CasaRow attach(MainActivity activity, String pkg, LinearLayout bar, int leftBlockId) {
+         if (pkg.isEmpty() || activity.getPackageManager().resolveContentProvider(pkg + ".now", 0) == null) return null;
+-        keepCasaUp(activity, pkg);
++        keepCasaUp(activity.getApplicationContext(), pkg, 0);
+         CasaRow row = new CasaRow(activity, pkg);
+         row.build(bar, leftBlockId);
+         return row;
+     }
+ 
+     private static boolean bound;
++    private static final long REBIND_MS = 3000;
++    private static final int REBIND_TRIES = 20;   // a minute, then the next start of Home binds it
++    private static final Handler REBIND = new Handler(Looper.getMainLooper());
+ 
+     /**
+      * Binds Casa's service for as long as the launcher's process lives, which keeps its alerts running over any channel.
+      * TCL refuses to let Casa make itself a foreground service from the background, but a binding from Home is allowed.
++     * When Casa is updated or force-stopped Android ends the binding for good (onBindingDied), so it is made again.
+      */
+-    private static void keepCasaUp(MainActivity activity, String pkg) {
++    private static void keepCasaUp(Context app, String pkg, int retriesLeft) {
+         if (bound) return;
+-        try {
+-            bound = activity.getApplicationContext().bindService(
+-                    new Intent().setComponent(new ComponentName(pkg, pkg + ".CasaService")), new ServiceConnection() {
+-                        @Override
+-                        public void onServiceConnected(ComponentName name, IBinder service) {
+-                        }
++        ServiceConnection connection = new ServiceConnection() {
++            @Override
++            public void onServiceConnected(ComponentName name, IBinder service) {
++            }
+ 
+-                        @Override
+-                        public void onServiceDisconnected(ComponentName name) {
+-                            // Casa crashed or was updated: Android rebinds by itself while the binding stands.
+-                        }
+-                    }, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
++            @Override
++            public void onServiceDisconnected(ComponentName name) {
++                // Casa crashed: Android brings it back by itself while the binding stands.
++            }
++
++            @Override
++            public void onBindingDied(ComponentName name) {
++                try {
++                    app.unbindService(this);
++                } catch (IllegalArgumentException alreadyGone) {
++                    // nothing left to release
++                }
++                bound = false;
++                // The new Casa may still be installing: try again in a moment.
++                REBIND.postDelayed(() -> keepCasaUp(app, pkg, REBIND_TRIES), REBIND_MS);
++            }
++        };
++        try {
++            bound = app.bindService(new Intent().setComponent(new ComponentName(pkg, pkg + ".CasaService")), connection,
++                    Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
+         } catch (RuntimeException refused) {
+             // An older Casa without the service, or without our permission: the row still reads what it can.
++            return;
++        }
++        if (!bound) {
++            try {
++                app.unbindService(connection);   // a failed bind still has to be released
++            } catch (IllegalArgumentException notRegistered) {
++                // older Android: nothing was registered
++            }
++            if (retriesLeft > 0) REBIND.postDelayed(() -> keepCasaUp(app, pkg, retriesLeft - 1), REBIND_MS);
+         }
+     }
+ 
+-- 
+2.54.0.windows.1
+

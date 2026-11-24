@@ -1,7 +1,7 @@
-From 93e0f995edc5c98f5368b20f136096123ae0ba71 Mon Sep 17 00:00:00 2001
+From 82f542117d52d38e5ebbcbf27d773a3fad694c2c Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Tue, 24 Nov 2026 07:49:58 +0100
-Subject: [PATCH 22/24] redirect_apps: a window of one app opens another, with
+Subject: [PATCH 22/26] redirect_apps: a window of one app opens another, with
  Home underneath (Fire OS's TV button opens Live TV itself)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

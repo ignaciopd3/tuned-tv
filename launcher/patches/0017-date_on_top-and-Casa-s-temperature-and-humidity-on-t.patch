@@ -1,7 +1,7 @@
-From 5aaead9af015f8311ee683ea9b6d9990b64da1bf Mon Sep 17 00:00:00 2001
+From 49c6c05b32576da994625ca6cac2f1471c28ea83 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Sun, 22 Nov 2026 23:08:18 +0100
-Subject: [PATCH 17/24] date_on_top, and Casa's temperature and humidity on the
+Subject: [PATCH 17/26] date_on_top, and Casa's temperature and humidity on the
  clock screens
 
 date_on_top: the date takes the greeting's line, so the weather beside the clock

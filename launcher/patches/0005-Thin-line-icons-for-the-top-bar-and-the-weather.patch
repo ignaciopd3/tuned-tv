@@ -1,7 +1,7 @@
-From 1d0799111d491fa848d926ee3ffaa340f5d19274 Mon Sep 17 00:00:00 2001
+From a1b1fd731a787d43a12ee8f3785334b4dc62b322 Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 16:58:08 +0100
-Subject: [PATCH 05/24] Thin line icons for the top bar and the weather
+Subject: [PATCH 05/26] Thin line icons for the top bar and the weather
 
 Inputs, Wi-Fi, Ethernet, the app library, Settings and the VPN locks drawn
 as 1.5 strokes, and the weather icons thinned from 1.7 to 1.5, so the top

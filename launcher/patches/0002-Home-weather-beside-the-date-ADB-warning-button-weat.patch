@@ -1,7 +1,7 @@
-From 2e4e9a61405937630e06bf4a16d7d3e815a11e29 Mon Sep 17 00:00:00 2001
+From f13a3dc1ae02f0f831578a3ff4e4ccc4f64f77cf Mon Sep 17 00:00:00 2001
 From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:13:10 +0100
-Subject: [PATCH 02/24] Home weather beside the date, ADB warning button,
+Subject: [PATCH 02/26] Home weather beside the date, ADB warning button,
  weather in the clock screensaver
 
 - addons/weather: NowProvider publishes the weather now (no place or position),
