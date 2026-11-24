@@ -1,7 +1,12 @@
 # Results · TCL C845 · MT9615 · EU
 
 Measured with `run.py measure`, idle on the home screen: the first measurement (2026-11-22) against the
-median of 3 after the last change (2026-11-23). It was taken after earlier changes, so the real gain is larger.
+median of 3 after the last change (2026-11-23).
+
+> **Not a true before.** By the first measurement, 50 changes made since 2026-11-17 were already in effect
+> (36 packages disabled, 14 settings changed), so the real gain is much larger than this table shows.
+>
+> At the very start (2026-11-17, before any change) the TV had 153 enabled packages; now 113 (−40).
 
 | | Before | After | Change |
 |---|---|---|---|

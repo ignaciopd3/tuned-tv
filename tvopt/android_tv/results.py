@@ -3,6 +3,7 @@
 Lee lo que guarda run.py medir (backups/medidas/*.json) y las ejecuciones aplicadas del motor
 (backups/<run>/rollback.sh; las deshechas llevan ROLLED_BACK). De cada grupo saca la mediana, que aguanta mejor el ruido
 de una medida suelta. El resultado solo lleva cifras: los nombres de procesos podrían delatar las apps de cada uno.
+Si no hay medida de antes, dice cuántos cambios ya estaban hechos y los paquetes activos de la foto ORIGINAL.
 Diseño: docs/superpowers/specs/2026-11-25-metricas-en-aportaciones-design.md
 """
 
@@ -17,6 +18,7 @@ from tvopt.android_tv.perf import PerfReport
 from tvopt.core.i18n import tr
 
 MINUS = "−"  # el signo menos de verdad, más legible que el guion en una tabla
+_KINDS_ORDER = ("pkg", "set", "op", "prop")
 
 
 class NoResults(Exception):
@@ -42,6 +44,9 @@ class Results:
     last_change: str
     baseline_is_first: bool  # no había medida de antes: «antes» es la primera medida, tomada tras otros cambios
     baseline_date: str
+    earlier: tuple[tuple[str, int], ...] = ()  # sin medida de antes: cambios ya en vigor en la primera, por tipo
+    original_enabled: int | None = None  # paquetes activos en la foto ORIGINAL, antes de cualquier cambio
+    original_date: str = ""
 
 
 def _date(stamp: str) -> str:
@@ -56,6 +61,35 @@ def _figures(reports: list[PerfReport]) -> Figures:
         processes=median(r.tasks for r in reports),
         packages=median(r.packages_enabled for r in reports),
     )
+
+
+def _earlier_changes(backups: Path, before_stamp: str) -> tuple[tuple[str, int], ...]:
+    """Los cambios en vigor de las ejecuciones anteriores a una medida, por tipo de línea de plan.txt (pkg, set…)."""
+    counts: dict[str, int] = {}
+    for run in sorted(backups.glob("2*")):
+        if run.name[:15] >= before_stamp or not (run / "rollback.sh").is_file() or (run / "ROLLED_BACK").exists():
+            continue
+        plan = run / "plan.txt"
+        for line in plan.read_text(encoding="utf-8").splitlines() if plan.is_file() else []:
+            if line.strip():
+                kind = line.split(maxsplit=1)[0]
+                counts[kind] = counts.get(kind, 0) + 1
+    return tuple(sorted(counts.items(), key=lambda kv: _KINDS_ORDER.index(kv[0]) if kv[0] in _KINDS_ORDER else 99))
+
+
+def _original_enabled(backups: Path) -> tuple[int | None, str]:
+    """Paquetes activos en la foto de antes de cualquier cambio (backups/ORIGINAL), y su fecha."""
+    marker = backups / "ORIGINAL"
+    if not marker.is_file():
+        return None, ""
+    run = marker.read_text(encoding="utf-8").strip()
+    snap = backups / run / "before"
+    try:
+        installed = [x for x in (snap / "packages.installed").read_text(encoding="utf-8").splitlines() if x.strip()]
+        disabled = [x for x in (snap / "packages.disabled").read_text(encoding="utf-8").splitlines() if x.strip()]
+    except OSError:
+        return None, ""
+    return len(installed) - len(disabled), _date(run)
 
 
 def compute(backups: Path) -> Results:
@@ -82,11 +116,15 @@ def compute(backups: Path) -> Results:
             )
         )
     baseline_date, baseline_is_first = _date(first), not before
+    earlier: tuple[tuple[str, int], ...] = ()
+    original_enabled, original_date = None, ""
     if not before:
         stamp, report = measures[0]
         if stamp > last:
             raise NoResults(tr("No hay ninguna medida de antes de los cambios: la próxima vez, mide antes de aplicar"))
         before, baseline_date = [report], _date(stamp)
+        earlier = _earlier_changes(backups, stamp)
+        original_enabled, original_date = _original_enabled(backups)
     return Results(
         before=_figures(before),
         after=_figures(after),
@@ -96,19 +134,27 @@ def compute(backups: Path) -> Results:
         last_change=_date(last),
         baseline_is_first=baseline_is_first,
         baseline_date=baseline_date,
+        earlier=earlier,
+        original_enabled=original_enabled,
+        original_date=original_date,
     )
 
 
 # Los textos del informe, en los dos idiomas: el results.md del repo va siempre en inglés y la pantalla, en el de
 # quien lo usa.
-_TEXT = {
+_TEXT: dict[bool, dict[str, str]] = {
     True: {
         "title": "# Results · {name}",
         "intro": "Measured with `run.py measure`, idle on the home screen: median of {nb} {measures} before the"
         " first change\n({first}) and {na} after the last one ({last}).",
         "intro_first": "Measured with `run.py measure`, idle on the home screen: the first measurement ({base})"
-        " against the\nmedian of {na} after the last change ({last}). It was taken after earlier changes, so the real"
-        " gain is larger.",
+        " against the\nmedian of {na} after the last change ({last}).",
+        "not_before": "> **Not a true before.** By the first measurement, {n} changes made since {first} were"
+        " already in effect\n> ({detail}), so the real gain is much larger than this table shows.",
+        "not_before_vague": "> **Not a true before.** The first measurement was taken after earlier changes, so"
+        " the real gain is much\n> larger than this table shows.",
+        "original": "> At the very start ({date}, before any change) the TV had {orig} enabled packages; now"
+        " {now} ({diff}).",
         "one": "measurement",
         "many": "measurements",
         "head": "| | Before | After | Change |",
@@ -125,8 +171,13 @@ _TEXT = {
         "intro": "Medido con `run.py medir`, en reposo en el inicio: mediana de {nb} {measures} antes del primer"
         " cambio\n({first}) y {na} después del último ({last}).",
         "intro_first": "Medido con `run.py medir`, en reposo en el inicio: la primera medida ({base}) frente a la "
-        "mediana de\n{na} después del último cambio ({last}). Se tomó después de otros cambios, así que la mejora real "
-        "es mayor.",
+        "mediana de\n{na} después del último cambio ({last}).",
+        "not_before": "> **No es un antes de verdad.** En la primera medida ya estaban en vigor {n} cambios hechos"
+        " desde el {first}\n> ({detail}), así que la mejora real es mucho mayor de lo que dice esta tabla.",
+        "not_before_vague": "> **No es un antes de verdad.** La primera medida se tomó después de otros cambios,"
+        " así que la mejora real es\n> mucho mayor de lo que dice esta tabla.",
+        "original": "> Al principio del todo ({date}, antes de cualquier cambio) tenía {orig} paquetes activos;"
+        " ahora, {now} ({diff}).",
         "one": "medida",
         "many": "medidas",
         "head": "| | Antes | Después | Cambio |",
@@ -137,6 +188,22 @@ _TEXT = {
         "packages": "Paquetes activos",
         "points": "puntos",
         "footer": "Hecho con `run.py resultados --perfil <tele>` a partir de las medidas de `backups/medidas/`.",
+    },
+}
+
+# Cada tipo de línea de plan.txt, en singular y en plural.
+_KIND_WORDS: dict[bool, dict[str, tuple[str, str]]] = {
+    True: {
+        "pkg": ("package disabled", "packages disabled"),
+        "set": ("setting changed", "settings changed"),
+        "op": ("app permission", "app permissions"),
+        "prop": ("log level", "log levels"),
+    },
+    False: {
+        "pkg": ("paquete deshabilitado", "paquetes deshabilitados"),
+        "set": ("ajuste cambiado", "ajustes cambiados"),
+        "op": ("permiso de app", "permisos de apps"),
+        "prop": ("nivel de registro", "niveles de registro"),
     },
 }
 
@@ -155,6 +222,25 @@ def _signed(diff: float, english: bool, unit: str = "") -> str:
 
 def _pct(value: float, english: bool) -> str:
     return f"{value:.1f}%" if english else f"{value:.1f}".replace(".", ",") + " %"
+
+
+def _not_before(r: Results, english: bool) -> str:
+    """La nota de cuando no hay medida de antes: cuánto se había cambiado ya y, si hay foto ORIGINAL, los paquetes."""
+    t, words = _TEXT[english], _KIND_WORDS[english]
+    parts = [f"{n} {words[k][0] if n == 1 else words[k][1]}" for k, n in r.earlier if k in words]
+    total = sum(n for _k, n in r.earlier)
+    if total:
+        note = t["not_before"].format(n=total, first=r.first_change, detail=", ".join(parts))
+    else:
+        note = t["not_before_vague"]
+    if r.original_enabled is not None:
+        note += "\n>\n" + t["original"].format(
+            date=r.original_date,
+            orig=_int(r.original_enabled, english),
+            now=_int(r.after.packages, english),
+            diff=_signed(r.after.packages - r.original_enabled, english),
+        )
+    return note
 
 
 def to_markdown(r: Results, profile_name: str, english: bool) -> str:
@@ -202,7 +288,10 @@ def to_markdown(r: Results, profile_name: str, english: bool) -> str:
             _signed(a.packages - b.packages, english),
         ),
     ]
-    lines = [t["title"].format(name=profile_name), "", intro, "", t["head"], "|---|---|---|---|"]
+    lines = [t["title"].format(name=profile_name), "", intro, ""]
+    if r.baseline_is_first:
+        lines += [_not_before(r, english), ""]
+    lines += [t["head"], "|---|---|---|---|"]
     lines += [f"| {label} | {before} | {after} | {change} |" for label, before, after, change in rows]
     lines += ["", t["footer"], ""]
     return "\n".join(lines)

@@ -42,13 +42,45 @@ def _measure(medidas: Path, stamp: str, report: PerfReport) -> None:
     (medidas / f"{stamp}.json").write_text(perf.to_json(report), encoding="utf-8")
 
 
-def _run(backups: Path, stamp: str, applied: bool = True, rolled_back: bool = False) -> None:
+def _run(
+    backups: Path, stamp: str, applied: bool = True, rolled_back: bool = False, plan: tuple[str, ...] = ()
+) -> None:
     run = backups / stamp
     run.mkdir(parents=True)
     if applied:
         (run / "rollback.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     if rolled_back:
         (run / "ROLLED_BACK").write_text("x\n", encoding="utf-8")
+    if plan:
+        (run / "plan.txt").write_text("".join(f"{line}\n" for line in plan), encoding="utf-8")
+
+
+def test_without_a_before_it_says_how_much_was_already_changed(backups: Path) -> None:
+    m = backups / "medidas"
+    _run(backups, "20261117-150000", applied=False)  # la foto ORIGINAL
+    snap = backups / "20261117-150000" / "before"
+    snap.mkdir(parents=True)
+    (snap / "packages.installed").write_text("".join(f"com.p{i}\n" for i in range(158)), encoding="utf-8")
+    (snap / "packages.disabled").write_text("com.p0\ncom.p1\ncom.p2\ncom.p3\ncom.p4\n", encoding="utf-8")
+    (backups / "ORIGINAL").write_text("20261117-150000\n", encoding="utf-8")
+    _run(backups, "20261117-153000", plan=("pkg a disable enabled",) * 35 + ("set global x 1 0",))
+    _run(backups, "20261117-160000", rolled_back=True, plan=("pkg b disable enabled",) * 9)  # deshecho: no cuenta
+    _run(backups, "20261117-170000", plan=("pkg c disable enabled", "set global y 1 0", "op com.z OP ignore allow"))
+    _measure(m, "20261122-230000", _report(1271, 288, 13.1, 373, 118))
+    _run(backups, "20261123-100000", plan=("pkg d disable enabled",))  # después de la primera medida: no cuenta
+    _measure(m, "20261124-100000", _report(1254, 242, 6.0, 377, 113))
+    r = results.compute(backups)
+    assert r.earlier == (("pkg", 36), ("set", 2), ("op", 1))
+    assert (r.original_enabled, r.original_date) == (153, "2026-11-17")
+    en = results.to_markdown(r, "TCL", english=True)
+    assert "> **Not a true before.** By the first measurement, 39 changes made since 2026-11-17 were already" in en
+    assert "> (36 packages disabled, 2 settings changed, 1 app permission), so the real gain is much larger" in en
+    assert "> At the very start (2026-11-17, before any change) the TV had 153 enabled packages; now 113 (−40)." in en
+    es = results.to_markdown(r, "TCL", english=False)
+    assert "> **No es un antes de verdad.** En la primera medida ya estaban en vigor 39 cambios hechos" in es
+    assert "(36 paquetes deshabilitados, 2 ajustes cambiados, 1 permiso de app)" in es
+    assert "tenía 153 paquetes activos; ahora, 113 (−40)." in es
+    assert "com.p" not in en + es  # ni un nombre de paquete
 
 
 @pytest.fixture

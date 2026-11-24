@@ -64,9 +64,12 @@ kept in memory, so it still opens in 0.13 s.
 ## Results
 
 In [`results.md`](results.md), made by `run.py results` from the measurements at idle: busy CPU goes from 13.1% to
-6.0% (−7.1 points), swap in use drops by 46 MB and 5 fewer packages are enabled. The first measurement came after the
-first clean-up, so the real gain is larger. Available memory stays the same: the clean home and its add-ons use what is
-freed.
+6.0% (−7.1 points) and swap in use drops by 46 MB. Available memory stays the same: the clean home and its add-ons use
+what is freed.
+
+> **Not a true before.** The first measurement (22 November) was taken with 50 changes made since the 17th already in
+> effect (36 packages disabled and 14 settings), so the real gain is much larger than the table shows. At the very
+> start the TV had 153 enabled packages; now 113.
 
 A load average of about 55 is not a problem. It comes from 55 MediaTek driver threads (HDMI, tuner, video) that wait
 without using CPU.
