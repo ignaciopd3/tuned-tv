@@ -69,6 +69,11 @@ With the **Casa** add-on and Smart Life / Tuya devices, the TV alerts you about 
 are watching, and switches the light or the heater from the home screen or a remote button. Step by step in the
 [smart home guide](docs/guides/home-automation.md). Home Assistant support is on the way.
 
+> [!NOTE]
+> **You need smart devices.** Each feature comes with its own, compatible with Smart Life / Tuya: a Wi-Fi plug for the
+> light, another for the heater, a door sensor, a gas detector and a temperature and humidity sensor. Add only the
+> ones you want. The [guide](docs/guides/home-automation.md#what-you-need) says what to look for.
+
 <sub>The door alerts are drawn with the add-on's colours and sizes; the gas alarm, the panel and the clock are crops of
 real screenshots (CC BY-SA wallpapers, see [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
 

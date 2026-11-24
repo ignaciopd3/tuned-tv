@@ -17,9 +17,23 @@ Los avisos salen encima de cualquier canal, app o entrada HDMI, con la tele ence
 
 ## Qué necesitas
 
-- Los aparatos dados de alta en la app **Smart Life** (o Tuya Smart): un enchufe para la luz, otro para el calefactor,
-  un sensor de puerta, uno de gas y uno de temperatura y humedad. Sirve cualquier combinación: lo que no tengas se queda
-  fuera.
+**Aparatos inteligentes en casa.** La tele no detecta nada por sí sola: cada función necesita su aparato, dado de alta
+en la app **Smart Life** (o Tuya Smart). Busca «Smart Life» o «Tuya» en la caja. Pon solo los que quieras; lo que no
+tengas se queda fuera.
+
+| Para | Necesitas |
+|---|---|
+| 💡 Luz | Un **enchufe inteligente wifi**, con la lámpara enchufada y encendida en su interruptor. |
+| ♨️ Calefactor | Otro **enchufe inteligente wifi** que aguante su potencia (mira los vatios del calefactor; muchos enchufes aguantan 16 A, unos 3.600 W), con el calefactor encendido en su propio interruptor. |
+| 🚪 Puerta | Un **sensor de puerta o ventana** (de contacto) wifi. |
+| 🔥 Gas | Un **detector de gas wifi**, enchufado a la corriente. |
+| 🌡️ Temperatura y humedad | Un **sensor de temperatura y humedad** wifi. |
+
+Probado con aparatos wifi, sin pasarela Zigbee. El aviso de gas en la tele es un aviso más: **no sustituye** a un
+detector homologado con su propia alarma.
+
+Además:
+
 - El launcher de Tuned TV instalado ([el launcher](../../README.es.md#el-launcher)).
 - En el ordenador, un entorno de Python aparte con las librerías de Tuya. Va fuera del repo, porque guarda tu sesión:
   ```bash

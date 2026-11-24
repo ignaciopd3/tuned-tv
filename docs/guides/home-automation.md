@@ -17,8 +17,23 @@ Alerts show over any channel, app or HDMI input, while the TV is on.
 
 ## What you need
 
-- The devices added to the **Smart Life** app (or Tuya Smart): a plug for the light, another for the heater, a door
-  sensor, a gas sensor and a temperature and humidity sensor. Any combination works: what you don't have is left out.
+**Smart devices at home.** The TV detects nothing on its own: each feature needs its device, added to the **Smart
+Life** app (or Tuya Smart). Look for "Smart Life" or "Tuya" on the box. Add only the ones you want; what you don't have
+is left out.
+
+| For | You need |
+|---|---|
+| 💡 Light | A **Wi-Fi smart plug**, with the lamp plugged in and switched on at its own switch. |
+| ♨️ Heater | Another **Wi-Fi smart plug** rated for its power (check the heater's watts; many plugs take 16 A, about 3,600 W), with the heater switched on at its own switch. |
+| 🚪 Door | A Wi-Fi **door or window (contact) sensor**. |
+| 🔥 Gas | A **Wi-Fi gas detector**, plugged into the mains. |
+| 🌡️ Temperature and humidity | A Wi-Fi **temperature and humidity sensor**. |
+
+Tested with Wi-Fi devices, without a Zigbee gateway. The gas alert on the TV is an extra warning: it **does not replace** a
+certified gas detector with its own alarm.
+
+Also:
+
 - Tuned TV's launcher installed ([the launcher](../../README.md#the-launcher)).
 - On the computer, a separate Python environment with the Tuya libraries. It lives outside the repo, because it keeps
   your session:

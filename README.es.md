@@ -68,6 +68,11 @@ Con el complemento **Casa** y aparatos de Smart Life / Tuya, la tele avisa de la
 viendo, y enciende la luz o el calefactor desde el inicio o con un botón del mando. Paso a paso, en la
 [guía de domótica](docs/guides/home-automation.es.md). Home Assistant, en camino.
 
+> [!NOTE]
+> **Hacen falta aparatos inteligentes.** Cada función va con el suyo, compatible con Smart Life / Tuya: un enchufe wifi
+> para la luz, otro para el calefactor, un sensor de puerta, un detector de gas y un sensor de temperatura y humedad.
+> Pon solo los que quieras. La [guía](docs/guides/home-automation.es.md#qué-necesitas) dice qué buscar.
+
 <sub>Los avisos de la puerta están dibujados con los colores y medidas del complemento; el gas, el panel y el reloj son
 recortes de capturas reales (fondos CC BY-SA, ver [launcher/CREDITS.md](launcher/CREDITS.md)).</sub>
 
