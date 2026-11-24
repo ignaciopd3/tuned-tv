@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tvopt.adb.client import Adb, AdbError
-from tvopt.android_tv import audit, plan, snapshot
+from tvopt.android_tv import audit, perf, plan, snapshot
 from tvopt.core.i18n import tr
 from tvopt.core.log import Fail, Log
 from tvopt.core.manifests import load_appops, load_packages, load_props, load_protected, load_settings
@@ -172,7 +172,9 @@ def _main(argv: list[str], log: Log) -> int:
         _rollback(o, adb, backups, log)
         return 0
 
-    # 3. Ejecución con foto previa
+    # 3. Ejecución con foto previa (y, si es el primer cambio de esta tele, una medida de antes)
+    if not o.dry_run and o.action in ("debloat", "optimize", "remap", "all"):
+        _measure_before(adb, backups, env.get("PROFILE_NAME") or o.profile, log)
     run_dir = snapshot.run_dir_new(backups)
     log.file = run_dir / "run.log"
     log.info(
@@ -265,6 +267,22 @@ def _run_script(adb: Adb, script: Path) -> tuple[int, str]:
         return adb.run_script(script)
     except AdbError:
         return 1, ""
+
+
+def _measure_before(adb: Adb, backups: Path, profile_name: str, log: Log) -> None:
+    """La primera vez que se cambia algo en esta tele y sin ninguna medida aún: una, para run.py resultados.
+
+    Va antes de crear la carpeta de la ejecución, así su fecha queda antes del cambio. Si falla, se sigue sin ella.
+    """
+    medidas = backups / "medidas"
+    if any(medidas.glob("*.json")) or any((d / "rollback.sh").is_file() for d in backups.glob("2*")):
+        return
+    try:
+        path, _ = perf.save(perf.measure(adb), medidas, profile_name)
+    except (AdbError, ValueError, OSError) as e:
+        log.warn(tr("No se pudo tomar la medida de antes ({detail}); sigo sin ella", detail=e))
+        return
+    log.ok(tr("Medida de antes de los cambios guardada: {path}", path=path))
 
 
 def _write_rollback(run_dir: Path, profile_id: str, serial: str, log: Log) -> None:

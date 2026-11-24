@@ -6,8 +6,6 @@ import argparse
 import io
 import os
 import sys
-import time
-from datetime import datetime
 from pathlib import Path
 
 from tvopt import __version__
@@ -62,28 +60,45 @@ def medir(profile_id: str, serial: str | None) -> int:
                 file=sys.stderr,
             )
             return 3
-        start = time.perf_counter()
-        sections = adb.batch(perf.PERF_SECTIONS, timeout=180)
-        seconds = round(time.perf_counter() - start, 1)
+        report = perf.measure(adb)
     except (AdbError, ValueError) as e:
         print(e, file=sys.stderr)
         return 1
-    now = datetime.now()
-    report = perf.parse(sections, taken_at=now.isoformat(timespec="seconds"), seconds=seconds)
     out_dir = profile_dir / "backups" / "medidas"
-    out_dir.mkdir(parents=True, exist_ok=True)
     previous = sorted(out_dir.glob("*.json"))
-    stamp = now.strftime("%Y%m%d-%H%M%S")
-    (out_dir / f"{stamp}.json").write_text(perf.to_json(report), encoding="utf-8")
-    markdown = perf.to_markdown(report, env.get("PROFILE_NAME", profile_id))
-    (out_dir / f"{stamp}.md").write_text(markdown, encoding="utf-8")
+    saved, markdown = perf.save(report, out_dir, env.get("PROFILE_NAME", profile_id))
     print(markdown)
     if previous:
         before = perf.from_json(previous[-1].read_text(encoding="utf-8"))
         print(tr("Comparado con la medida anterior ({stamp}):", stamp=previous[-1].stem))
         for line in perf.compare(before, report):
             print(f"  {line}")
-    print("\n" + tr("Guardado en {path}", path=f"{out_dir / stamp}.md"))
+    print("\n" + tr("Guardado en {path}", path=saved))
+    return 0
+
+
+def resultados(profile_id: str) -> int:
+    """Antes y después de los cambios, con las medidas guardadas; escribe profiles/<tele>/results.md (en inglés)."""
+    from tvopt.android_tv import results
+
+    if not PROFILE_ID_RE.match(profile_id):
+        print(tr("Nombre de perfil inválido: {profile}", profile=profile_id), file=sys.stderr)
+        return 2
+    profile_dir = profiles_dir() / profile_id
+    try:
+        env = load_env(profile_dir)
+        found = results.compute(profile_dir / "backups")
+    except ProfileError as e:
+        print(e, file=sys.stderr)
+        return e.exit_code
+    except results.NoResults as e:
+        print(e, file=sys.stderr)
+        return 1
+    name = env.get("PROFILE_NAME", profile_id)
+    out = profile_dir / "results.md"
+    out.write_text(results.to_markdown(found, name, english=True), encoding="utf-8", newline="\n")
+    print(results.to_markdown(found, name, english=language() == "en"))
+    print(tr("Guardado en {path}", path=out))
     return 0
 
 
@@ -148,6 +163,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=tr("perfil de la tele (carpeta de profiles/)"),
     )
     measure.add_argument("--serial", help=tr("ip:puerto de la tele (por defecto, la variable TV_SERIAL)"))
+    res = sub.add_parser(
+        "resultados",
+        aliases=["results"],
+        help=tr("compara las medidas de antes y de después de los cambios y escribe results.md para compartir"),
+    )
+    res.add_argument(
+        *_names("--perfil", "--profile"),
+        dest="perfil",
+        metavar=tr("PERFIL"),
+        required=True,
+        help=tr("perfil de la tele (carpeta de profiles/)"),
+    )
     lch = sub.add_parser("launcher", help=tr("compila (con caché) e instala el launcher, los complementos y el tema"))
     lch.add_argument(
         *_names("--perfil", "--profile"),
@@ -187,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     parsed = build_parser().parse_args(args)
     if parsed.orden in ("medir", "measure"):
         return medir(parsed.perfil, parsed.serial)
+    if parsed.orden in ("resultados", "results"):
+        return resultados(parsed.perfil)
     if parsed.orden == "launcher":
         return launcher(parsed.perfil, parsed.solo_compilar, parsed.forzar)
     return 2

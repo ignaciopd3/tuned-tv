@@ -69,7 +69,7 @@ The engine refuses to touch any TV while `MATCH_VALUE` is `CAMBIAR`.
 ```bash
 export TV_SERIAL=<tv-ip>:5555
 uv run run.py engine --profile <your-profile> --action audit
-uv run run.py measure --profile <your-profile>                      # before, idle at Home
+uv run run.py measure --profile <your-profile>                      # before, idle at Home (the engine also takes one)
 uv run run.py engine --profile <your-profile> --action all --dry-run
 uv run run.py engine --profile <your-profile> --action all
 ```
@@ -85,8 +85,18 @@ Then check, one by one, everything people use:
 - casting;
 - the TV after a reboot.
 
-Measure again (`run.py measure`), idle at Home. If something broke, `--action rollback` and move that package to
-`packages.caution` with a note.
+Measure again (`run.py measure`), idle at Home; once or twice more over a while makes the figures steadier. If
+something broke, `--action rollback` and move that package to `packages.caution` with a note.
+
+Then write the results to share:
+
+```bash
+uv run run.py results --profile <your-profile>                      # writes profiles/<your-profile>/results.md
+```
+
+It compares the measurements from before the first change with those after the last one (the median of each group)
+and keeps only figures: memory, swap, CPU at idle, processes and enabled packages. The engine measures by itself before
+the first real change, in case you forget.
 
 ### 6. Write the model's README
 
@@ -94,7 +104,7 @@ Measure again (`run.py measure`), idle at Home. If something broke, `--action ro
 
 - a table with the model, system, chip, how to connect and when you tested it;
 - what is disabled and why, by group, and what it costs (voice, casting…);
-- results before and after;
+- a link to `results.md`, with its headline figures;
 - the model's quirks;
 - how to use it and undo it.
 

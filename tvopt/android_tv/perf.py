@@ -8,10 +8,16 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict, dataclass
-from typing import Any
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from tvopt.core.i18n import N_, language, tr
+
+if TYPE_CHECKING:
+    from tvopt.adb.client import Adb
 
 PERF_SECTIONS: dict[str, str] = {
     "stat1": "head -1 /proc/stat",
@@ -182,6 +188,24 @@ def parse(sections: dict[str, str], taken_at: str, seconds: float) -> PerfReport
         packages_third=_int(sections.get("pkgs_third", "")),
         data_used_pct=int(used.group(1)) if used else 0,
     )
+
+
+def measure(adb: Adb) -> PerfReport:
+    """Una medida de la tele, solo leyendo (unos 7 s)."""
+    start = time.perf_counter()
+    sections = adb.batch(PERF_SECTIONS, timeout=180)
+    seconds = round(time.perf_counter() - start, 1)
+    return parse(sections, taken_at=datetime.now().isoformat(timespec="seconds"), seconds=seconds)
+
+
+def save(report: PerfReport, out_dir: Path, profile_name: str) -> tuple[Path, str]:
+    """Guarda la medida en out_dir como <fecha>.json y <fecha>.md; devuelve la ruta del .md y su texto."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.fromisoformat(report.taken_at).strftime("%Y%m%d-%H%M%S")
+    (out_dir / f"{stamp}.json").write_text(to_json(report), encoding="utf-8")
+    markdown = to_markdown(report, profile_name)
+    (out_dir / f"{stamp}.md").write_text(markdown, encoding="utf-8")
+    return out_dir / f"{stamp}.md", markdown
 
 
 def _mb(kb: int) -> str:

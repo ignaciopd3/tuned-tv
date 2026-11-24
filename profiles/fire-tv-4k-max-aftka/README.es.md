@@ -47,16 +47,11 @@ enlaces de anuncios, soporte remoto y el actualizador OTA). `appops.conf` les qu
 
 ## Resultados
 
-Medido en reposo con `run.py medir`:
-
-| | Antes | Después |
-|---|---|---|
-| Memoria disponible | 915 MB | 965 MB |
-| Intercambio en uso | 154 MB | 137 MB |
-| Paquetes activos | 249 | 191 |
-
-Con el inicio limpio (abajo), en reposo: unos 836 MB disponibles, 40 MB de intercambio y un 3,6 % de CPU total. Lo que
-queda es el servicio de audio del firmware, que gasta un 20 % de un núcleo sin sonar nada y no se puede tocar sin root.
+En [`results.md`](results.md), hecho con `run.py resultados` a partir de las medidas en reposo, de antes del primer
+cambio y de después del último, ya con el inicio limpio: la CPU ocupada baja de 11,0 % a 5,9 % (−5,1 puntos), el
+intercambio en uso baja 128 MB y quedan 58 paquetes activos menos. La memoria disponible queda igual: el inicio limpio y
+sus complementos usan la que se libera. Lo que más CPU gasta ahora es el servicio de audio del firmware, un 20 % de un
+núcleo sin sonar nada, que no se puede tocar sin root.
 
 ## Inicio limpio (opcional)
 

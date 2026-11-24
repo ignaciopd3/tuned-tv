@@ -45,16 +45,11 @@ ignore`).
 
 ## Results
 
-Measured at idle with `run.py measure`:
-
-| | Before | After |
-|---|---|---|
-| Available memory | 915 MB | 965 MB |
-| Swap in use | 154 MB | 137 MB |
-| Enabled packages | 249 | 191 |
-
-With the clean home (below), at idle: about 836 MB available, 40 MB of swap and 3.6 % total CPU. What is left is the
-firmware's audio service, which uses about 20 % of one core with nothing playing and cannot be touched without root.
+In [`results.md`](results.md), made by `run.py results` from the measurements at idle, before the first change and after
+the last one, already with the clean home: busy CPU goes from 11.0% to 5.9% (−5.1 points), swap in use drops by 128 MB
+and 58 fewer packages are enabled. Available memory stays the same: the clean home and its add-ons use what is freed.
+What uses most CPU now is the firmware's audio service, about 20% of one core with nothing playing, which cannot be
+touched without root.
 
 ## Clean home (optional)
 

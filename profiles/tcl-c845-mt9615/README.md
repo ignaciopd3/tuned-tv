@@ -63,14 +63,10 @@ kept in memory, so it still opens in 0.13 s.
 
 ## Results
 
-Measured at idle with `run.py measure`, from the first measurement to the last:
-
-| | Before | After |
-|---|---|---|
-| Busy CPU at idle | ~12–13 % | 4.5 % |
-| Available memory | 1,271 MB | 1,345 MB |
-| Swap in use | 288 MB | 269 MB |
-| Enabled packages | 118 | 114 |
+In [`results.md`](results.md), made by `run.py results` from the measurements at idle: busy CPU goes from 13.1% to
+6.0% (−7.1 points), swap in use drops by 46 MB and 5 fewer packages are enabled. The first measurement came after the
+first clean-up, so the real gain is larger. Available memory stays the same: the clean home and its add-ons use what is
+freed.
 
 A load average of about 55 is not a problem. It comes from 55 MediaTek driver threads (HDMI, tuner, video) that wait
 without using CPU.

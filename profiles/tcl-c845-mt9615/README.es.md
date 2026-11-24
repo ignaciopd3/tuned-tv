@@ -66,14 +66,10 @@ app cerrada. Se queda en memoria, así que sigue abriendo en 0,13 s.
 
 ## Resultados
 
-Medido en reposo con `run.py medir`, de la primera medida a la última:
-
-| | Antes | Después |
-|---|---|---|
-| CPU ocupada en reposo | ~12–13 % | 4,5 % |
-| Memoria disponible | 1.271 MB | 1.345 MB |
-| Intercambio en uso | 288 MB | 269 MB |
-| Paquetes activos | 118 | 114 |
+En [`results.md`](results.md), hecho con `run.py resultados` a partir de las medidas en reposo: la CPU ocupada baja de
+13,1 % a 6,0 % (−7,1 puntos), el intercambio en uso baja 46 MB y quedan 5 paquetes activos menos. La primera medida es
+de después de la primera limpieza, así que la mejora real es mayor. La memoria disponible queda igual: el inicio limpio
+y sus complementos usan la que se libera.
 
 Una carga media de unos 55 no es un problema. Sale de 55 hilos de drivers de MediaTek (HDMI, sintonizador, vídeo) que
 esperan sin usar CPU.

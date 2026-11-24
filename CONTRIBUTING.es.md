@@ -72,7 +72,7 @@ El motor se niega a tocar ninguna tele mientras `MATCH_VALUE` sea `CAMBIAR`.
 ```bash
 export TV_SERIAL=<ip-de-la-tele>:5555
 uv run run.py motor --profile <tu-perfil> --action audit
-uv run run.py medir --perfil <tu-perfil>                      # antes, quieta en el inicio
+uv run run.py medir --perfil <tu-perfil>                      # antes, quieta en el inicio (el motor también toma una)
 uv run run.py motor --profile <tu-perfil> --action all --dry-run
 uv run run.py motor --profile <tu-perfil> --action all
 ```
@@ -88,8 +88,18 @@ Después prueba, una a una, las cosas que usa la gente:
 - el envío desde el móvil;
 - la tele tras un reinicio.
 
-Vuelve a medir (`run.py medir`), quieta en el inicio. Si algo se rompió, `--action rollback` y pasa ese paquete a
-`packages.caution` con una nota.
+Vuelve a medir (`run.py medir`), quieta en el inicio; una o dos veces más al cabo de un rato dan cifras más estables.
+Si algo se rompió, `--action rollback` y pasa ese paquete a `packages.caution` con una nota.
+
+Después, saca los resultados para compartir:
+
+```bash
+uv run run.py resultados --perfil <tu-perfil>                 # escribe profiles/<tu-perfil>/results.md
+```
+
+Compara las medidas de antes del primer cambio con las de después del último (la mediana de cada grupo) y solo guarda
+cifras: memoria, intercambio, CPU en reposo, procesos y paquetes activos. El motor mide solo antes del primer cambio
+de verdad, por si se te olvida.
 
 ### 6. Escribe el README del modelo
 
@@ -97,7 +107,7 @@ Vuelve a medir (`run.py medir`), quieta en el inicio. Si algo se rompió, `--act
 
 - una tabla con el modelo, el sistema, el chip, cómo conectarse y cuándo lo probaste;
 - qué se deshabilita y por qué, por grupos, y lo que cuesta (voz, envío desde el móvil…);
-- resultados antes y después;
+- un enlace a `results.md`, con sus cifras principales;
 - las rarezas del modelo;
 - cómo usarlo y cómo deshacerlo.
 

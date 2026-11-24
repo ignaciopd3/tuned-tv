@@ -99,10 +99,12 @@ Roku, Hisense VIDAA and anything that needs root are out of scope.
 
 ### Tested models
 
-| Model | System | Profile |
-|---|---|---|
-| TCL C845 (G05, MediaTek MT9615, EU) | Google TV 11 | [`profiles/tcl-c845-mt9615`](profiles/tcl-c845-mt9615/README.md) |
-| Amazon Fire TV Stick 4K Max (1st gen, AFTKA) | Fire OS 7.7 | [`profiles/fire-tv-4k-max-aftka`](profiles/fire-tv-4k-max-aftka/README.md) |
+| Model | System | Profile | Results, at idle |
+|---|---|---|---|
+| TCL C845 (G05, MediaTek MT9615, EU) | Google TV 11 | [`profiles/tcl-c845-mt9615`](profiles/tcl-c845-mt9615/README.md) | [CPU −7.1 points · swap −46 MB](profiles/tcl-c845-mt9615/results.md) |
+| Amazon Fire TV Stick 4K Max (1st gen, AFTKA) | Fire OS 7.7 | [`profiles/fire-tv-4k-max-aftka`](profiles/fire-tv-4k-max-aftka/README.md) | [CPU −5.1 points · swap −128 MB · 58 fewer packages](profiles/fire-tv-4k-max-aftka/results.md) |
+
+Every profile brings its `results.md`, made by `run.py results` from its measurements before and after.
 
 Your model is not here? It can still work: start from the closest profile or from `profiles/_template`, and send it
 back when it runs well.

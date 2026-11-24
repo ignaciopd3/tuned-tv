@@ -19,7 +19,10 @@ _ERRORS = {"Fail", "ProfileError", "AdbError", "ValueError", "FileNotFoundError"
 
 def files() -> list[Path]:
     out = subprocess.run(
-        ["git", "ls-files", "tvopt/*.py", "tools/*.py", "run.py"], capture_output=True, text=True, cwd=ROOT
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "tvopt/*.py", "tools/*.py", "run.py"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
     )
     return [ROOT / p for p in out.stdout.split() if (ROOT / p).name not in ("i18n.py", "i18n_en.py")]
 

@@ -233,6 +233,23 @@ Files: `before/` (full state, read only) · `audit/wifi.txt` · `audit/packages.
     "tv-opt: conectar, limpiar y optimizar teles": "tv-opt: connect, debloat and tune TVs",
     "orden": "command",
     "PERFIL": "PROFILE",
+    "compara las medidas de antes y de después de los cambios y escribe results.md para compartir": (
+        "compares the measurements before and after the changes and writes results.md to share"
+    ),
+    # ---- resultados
+    "No hay cambios en vigor: aplica el perfil con el motor antes de sacar resultados": (
+        "No changes in effect: apply the profile with the engine before getting results"
+    ),
+    "No hay medidas después del último cambio ({date}): mide con run.py medir, con la tele en reposo en el inicio": (
+        "No measurements after the last change ({date}): measure with run.py measure, with the TV idle at home"
+    ),
+    "No hay ninguna medida de antes de los cambios: la próxima vez, mide antes de aplicar": (
+        "There is no measurement from before the changes: next time, measure before applying"
+    ),
+    "Medida de antes de los cambios guardada: {path}": "Measurement from before the changes saved: {path}",
+    "No se pudo tomar la medida de antes ({detail}); sigo sin ella": (
+        "Could not take the measurement from before ({detail}); carrying on without it"
+    ),
     "el motor: foto, auditoría, plan, aplicar y deshacer (motor --help)": (
         "the engine: snapshot, audit, plan, apply and undo (engine --help)"
     ),

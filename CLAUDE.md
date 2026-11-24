@@ -62,4 +62,4 @@ No change reaches a real TV before it passes the engine scenarios (`tests/test_e
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md): find the exact model (`getprop`), copy `profiles/_template` to
 `profiles/<brand>-<model>-<chip>/`, fill `profile.env`, build the lists from the system guide and the references, dry
-run, apply, measure, and write the model's README.md.
+run, apply, measure, write `results.md` with `run.py results --profile <tv>`, and write the model's README.md.

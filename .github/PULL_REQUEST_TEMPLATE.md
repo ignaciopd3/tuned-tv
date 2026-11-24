@@ -8,6 +8,7 @@
 - [ ] Dry-run plan reviewed (paste or attach it) / Plan de la simulación revisado (pégalo o adjúntalo)
 - [ ] Applied and tested Wi-Fi, HDMI, tuner, sound, remote, apps, casting and a reboot / Aplicado y probado wifi, HDMI, TDT, sonido, mando, apps, envío desde el móvil y un reinicio
 - [ ] Measured before and after, idle at Home (`run.py measure`) / Medido antes y después, quieta en el inicio
+- [ ] `results.md` from `run.py results --profile <tv>` included / incluido el `results.md` de `run.py resultados`
 - [ ] `README.md` for the model (and `README.es.md` if possible) / del modelo
 - [ ] Every list line has its reason / Cada línea de las listas lleva su motivo
 

@@ -98,10 +98,12 @@ Roku, Hisense VIDAA y lo que necesite root quedan fuera.
 
 ### Modelos probados
 
-| Modelo | Sistema | Perfil |
-|---|---|---|
-| TCL C845 (G05, MediaTek MT9615, EU) | Google TV 11 | [`profiles/tcl-c845-mt9615`](profiles/tcl-c845-mt9615/README.es.md) |
-| Amazon Fire TV Stick 4K Max (1.ª gen., AFTKA) | Fire OS 7.7 | [`profiles/fire-tv-4k-max-aftka`](profiles/fire-tv-4k-max-aftka/README.es.md) |
+| Modelo | Sistema | Perfil | Resultados, en reposo |
+|---|---|---|---|
+| TCL C845 (G05, MediaTek MT9615, EU) | Google TV 11 | [`profiles/tcl-c845-mt9615`](profiles/tcl-c845-mt9615/README.es.md) | [CPU −7,1 puntos · intercambio −46 MB](profiles/tcl-c845-mt9615/results.md) |
+| Amazon Fire TV Stick 4K Max (1.ª gen., AFTKA) | Fire OS 7.7 | [`profiles/fire-tv-4k-max-aftka`](profiles/fire-tv-4k-max-aftka/README.es.md) | [CPU −5,1 puntos · intercambio −128 MB · 58 paquetes menos](profiles/fire-tv-4k-max-aftka/results.md) |
+
+Cada perfil trae su `results.md`, hecho con `run.py resultados` a partir de sus medidas de antes y de después.
 
 ¿No está tu modelo? Puede funcionar igual: parte del perfil más parecido o de `profiles/_template`, y compártelo
 cuando vaya bien.
