@@ -137,6 +137,18 @@ uv run python -m tvopt.core.privacy
   `git format-patch` into `launcher/patches/`, keeping the numbering. Send fixes that are not specific to Tuned TV
   upstream to cleanyourtv too.
 
+## Home automation and the doorbell
+
+Casa's Home Assistant side ([guide](docs/guides/home-assistant.md)) is experimental: it has not met a real doorbell
+yet. What helps most:
+
+- **A test report** in an issue: the doorbell or camera (brand, model), the lock or intercom, your Home Assistant
+  version, the TV, and what worked (the card, the video, the sound, opening). Hide addresses and tokens.
+- **Code** follows the add-ons' way: Java in a cleanyourtv clone (`addons/casa`), a JVM test for every piece that does
+  not need a screen (`./gradlew testReleaseUnitTest`), then `git format-patch` into `launcher/patches/`. Home Assistant
+  is faked in the tests (`FakeWsServer`), so nobody needs a doorbell to change the logic.
+- **The card's look** is chosen on a mockup first; `TimbreCard` is the only class that knows its shape.
+
 ## Translations
 
 Everything on the TV follows the TV's language. English is the default and Spanish is complete; any other language

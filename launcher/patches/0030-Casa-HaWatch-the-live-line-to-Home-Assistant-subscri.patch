@@ -1,0 +1,384 @@
+From ed9c5148fd41e6d64af03b360eb0dd22d9fdb33b Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:29:06 +0100
+Subject: [PATCH 30/32] Casa: HaWatch, the live line to Home Assistant
+ (subscribe, report, call, ping, reconnect)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../io/github/ignaciopd3/casa/HaWatch.java    | 188 ++++++++++++++++++
+ .../github/ignaciopd3/casa/HaWatchTest.java   | 167 ++++++++++++++++
+ 2 files changed, 355 insertions(+)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWatchTest.java
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
+new file mode 100644
+index 0000000..33e5836
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
+@@ -0,0 +1,188 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.IOException;
++import java.net.SocketTimeoutException;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * Casa's live line to Home Assistant, on its own thread: sign in with the token, subscribe to the configured entities
++ * only (Home Assistant filters and pushes, nothing is polled), report every state and every new event, and carry the
++ * service calls (the yellow key's light) on the same socket. A silent line is checked with Home Assistant's own ping;
++ * a dropped one is retried after 2 s, then longer up to a minute. A refused token waits for a new configuration.
++ */
++final class HaWatch implements Runnable {
++    interface Listener {
++        /** Called on the watcher's thread with a copy of the attributes. */
++        void haState(String entityId, boolean initial, boolean stateChanged, String state, JSONObject attributes);
++
++        /** A new event of an event entity ("ring", "motion"…), never the one it had when Casa connected. */
++        void haEvent(String entityId, String type);
++
++        void haLink(boolean up);
++
++        void haAuthFailed();
++    }
++
++    interface Connector {
++        WebSocket open() throws IOException;
++    }
++
++    private static final long MAX_BACKOFF_MS = 60_000;
++
++    private final HaConfig config;
++    private final Connector connector;
++    private final Listener listener;
++    private final long minBackoffMs;
++    private final int quietMs;
++    private final Map<String, Ha.Entity> states = new HashMap<>();
++    private final Map<String, String> lastEvent = new HashMap<>();
++    private volatile boolean stopped;
++    private volatile WebSocket ws;
++    private int nextId = 1;
++    private boolean linked;   // this connection reached the subscription (watcher's thread only)
++
++    HaWatch(HaConfig config, Connector connector, Listener listener) {
++        this(config, connector, listener, 2_000, 30_000);
++    }
++
++    /** minBackoffMs: first wait after a drop; quietMs: silence after which a ping checks the line. */
++    HaWatch(HaConfig config, Connector connector, Listener listener, long minBackoffMs, int quietMs) {
++        this.config = config;
++        this.connector = connector;
++        this.listener = listener;
++        this.minBackoffMs = minBackoffMs;
++        this.quietMs = quietMs;
++    }
++
++    private static final class AuthRefused extends IOException {
++        AuthRefused() {
++            super("token refused");
++        }
++    }
++
++    @Override
++    public void run() {
++        long backoff = minBackoffMs;
++        while (!stopped) {
++            linked = false;
++            try {
++                WebSocket socket = connector.open();
++                ws = socket;
++                try {
++                    session(socket);
++                } finally {
++                    ws = null;
++                    socket.close();
++                }
++            } catch (AuthRefused e) {
++                listener.haAuthFailed();
++                return;   // CasaService starts a new watcher when the PC sends a new token
++            } catch (IOException | JSONException | RuntimeException e) {
++                // dropped, refused or garbled: try again below
++            }
++            if (stopped) return;
++            if (linked) {
++                listener.haLink(false);
++                backoff = minBackoffMs;
++            }
++            sleep(backoff);
++            backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
++        }
++    }
++
++    /** One connection, until it drops or the watcher stops. */
++    private void session(WebSocket socket) throws IOException, JSONException {
++        socket.setReadTimeout(quietMs);
++        JSONObject hello = read(socket);
++        if (!"auth_required".equals(hello.optString("type"))) throw new IOException("not Home Assistant");
++        socket.send(Ha.auth(config.token));
++        JSONObject auth = read(socket);
++        if ("auth_invalid".equals(auth.optString("type"))) throw new AuthRefused();
++        if (!"auth_ok".equals(auth.optString("type"))) throw new IOException("unexpected " + auth.optString("type"));
++        int sub;
++        synchronized (this) {
++            sub = nextId++;
++        }
++        socket.send(Ha.subscribeEntities(sub, config.entityIds()));
++        states.clear();
++        boolean awaitingPong = false;
++        while (!stopped) {
++            String text;
++            try {
++                text = socket.receive();
++            } catch (SocketTimeoutException quiet) {
++                if (awaitingPong) throw new IOException("no answer to the ping");
++                synchronized (this) {
++                    socket.send(Ha.ping(nextId++));
++                }
++                awaitingPong = true;
++                continue;
++            }
++            if (text == null) throw new IOException("closed by Home Assistant");
++            awaitingPong = false;
++            JSONObject msg = new JSONObject(text);
++            String type = msg.optString("type");
++            if ("result".equals(type) && msg.optInt("id") == sub) {
++                if (!msg.optBoolean("success")) throw new IOException("subscription refused");
++                linked = true;
++                listener.haLink(true);
++            } else if ("event".equals(type) && msg.optInt("id") == sub) {
++                dispatch(msg.getJSONObject("event"));
++            }
++        }
++    }
++
++    private void dispatch(JSONObject event) throws JSONException {
++        List<Ha.Change> changes = Ha.apply(states, event);
++        for (Ha.Change c : changes) {
++            if (c.removed) continue;
++            Ha.Entity e = states.get(c.id);
++            listener.haState(c.id, c.initial, c.stateChanged, e.state, new JSONObject(e.attributes.toString()));
++            String fired = Ha.newEvent(c, e, lastEvent);
++            if (fired != null) listener.haEvent(c.id, fired);
++        }
++    }
++
++    private static JSONObject read(WebSocket socket) throws IOException, JSONException {
++        String text = socket.receive();
++        if (text == null) throw new IOException("closed during sign-in");
++        return new JSONObject(text);
++    }
++
++    /** Sends a service call on the live connection; false when Home Assistant is not connected right now. */
++    boolean call(String domain, String service, String entityId) {
++        WebSocket socket = ws;
++        if (socket == null) return false;
++        try {
++            synchronized (this) {
++                socket.send(Ha.callService(nextId++, domain, service, entityId));
++            }
++            return true;
++        } catch (IOException e) {
++            return false;
++        }
++    }
++
++    void stop() {
++        stopped = true;
++        WebSocket socket = ws;
++        if (socket != null) socket.close();
++        synchronized (this) {
++            notifyAll();
++        }
++    }
++
++    private synchronized void sleep(long ms) {
++        long until = System.currentTimeMillis() + ms;
++        try {
++            for (long left = ms; left > 0 && !stopped; left = until - System.currentTimeMillis()) wait(left);
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            stopped = true;
++        }
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWatchTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWatchTest.java
+new file mode 100644
+index 0000000..1d2968f
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWatchTest.java
+@@ -0,0 +1,167 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++import java.util.concurrent.BlockingQueue;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicInteger;
++import org.json.JSONObject;
++import org.junit.Test;
++
++public class HaWatchTest {
++    /** What the watcher told Casa, in order, as short strings. */
++    static final class Heard implements HaWatch.Listener {
++        final BlockingQueue<String> q = new LinkedBlockingQueue<>();
++
++        @Override
++        public void haState(String id, boolean initial, boolean stateChanged, String state, JSONObject attributes) {
++            q.add("state " + id + "=" + state + (initial ? " initial" : ""));
++        }
++
++        @Override
++        public void haEvent(String id, String type) {
++            q.add("event " + id + " " + type);
++        }
++
++        @Override
++        public void haLink(boolean up) {
++            q.add("link " + up);
++        }
++
++        @Override
++        public void haAuthFailed() {
++            q.add("auth failed");
++        }
++
++        String next() throws InterruptedException {
++            return q.poll(5, TimeUnit.SECONDS);
++        }
++    }
++
++    private static HaConfig config() throws Exception {
++        return HaConfig.parse(HaConfigTest.SAMPLE);
++    }
++
++    /** Home Assistant's side of the start: auth_required, the token, auth_ok, the subscription and its result. */
++    private static JSONObject start(FakeWsServer.Peer p, String token) throws Exception {
++        p.sendText("{\"type\":\"auth_required\",\"ha_version\":\"2026.11.3\"}");
++        JSONObject auth = new JSONObject(p.readText());
++        assertEquals("auth", auth.getString("type"));
++        assertEquals(token, auth.getString("access_token"));
++        p.sendText("{\"type\":\"auth_ok\",\"ha_version\":\"2026.11.3\"}");
++        JSONObject sub = new JSONObject(p.readText());
++        p.sendText("{\"id\":" + sub.getInt("id") + ",\"type\":\"result\",\"success\":true,\"result\":null}");
++        return sub;
++    }
++
++    @Test
++    public void subscribesToItsEntitiesReportsStatesAndOnlyNewRings() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Heard heard = new Heard();
++            HaConfig c = config();
++            HaWatch w = new HaWatch(c, () -> WebSocket.connect(server.uri(), 3000), heard, 50, 30_000);
++            Thread t = new Thread(w);
++            t.start();
++            try (FakeWsServer.Peer p = server.accept()) {
++                JSONObject sub = start(p, "eyJ.abc.def");
++                assertEquals("subscribe_entities", sub.getString("type"));
++                assertTrue(sub.getJSONArray("entity_ids").toString().contains("event.puerta_ding"));
++                assertTrue(sub.getJSONArray("entity_ids").toString().contains("binary_sensor.gas"));
++                int id = sub.getInt("id");
++                assertEquals("link true", heard.next());
++                p.sendText("{\"id\":" + id + ",\"type\":\"event\",\"event\":{\"a\":{"
++                        + "\"light.salon\":{\"s\":\"on\",\"a\":{}},"
++                        + "\"event.puerta_ding\":{\"s\":\"2026-11-25T10:00:00.000+00:00\",\"a\":{\"event_type\":\"ring\"}}}}}");
++                String a = heard.next(), b = heard.next();
++                assertTrue(a + b, (a + b).contains("state light.salon=on initial"));
++                assertTrue(a + b, (a + b).contains("state event.puerta_ding=2026-11-25T10:00:00.000+00:00 initial"));
++                p.sendText("{\"id\":" + id + ",\"type\":\"event\",\"event\":{\"c\":{\"event.puerta_ding\":"
++                        + "{\"+\":{\"s\":\"2026-11-25T21:47:12.000+00:00\"}}}}}");
++                assertEquals("state event.puerta_ding=2026-11-25T21:47:12.000+00:00", heard.next());
++                assertEquals("event event.puerta_ding ring", heard.next());
++
++                assertTrue(w.call("homeassistant", "toggle", "light.salon"));
++                JSONObject call = new JSONObject(p.readText());
++                assertEquals("call_service", call.getString("type"));
++                assertEquals("light.salon", call.getJSONObject("target").getString("entity_id"));
++                w.stop();
++            }
++            t.join(5000);
++            assertFalse(t.isAlive());
++        }
++    }
++
++    @Test
++    public void aRefusedTokenIsSaidOnceAndNotRetriedInALoop() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Heard heard = new Heard();
++            AtomicInteger opens = new AtomicInteger();
++            HaWatch w = new HaWatch(config(), () -> {
++                opens.incrementAndGet();
++                return WebSocket.connect(server.uri(), 3000);
++            }, heard, 50, 30_000);
++            Thread t = new Thread(w);
++            t.start();
++            try (FakeWsServer.Peer p = server.accept()) {
++                p.sendText("{\"type\":\"auth_required\"}");
++                p.readText();
++                p.sendText("{\"type\":\"auth_invalid\",\"message\":\"Invalid access token or password\"}");
++                assertEquals("auth failed", heard.next());
++            }
++            Thread.sleep(500);
++            assertEquals(1, opens.get());   // a revoked token waits for a new configuration, not for 2 s
++            w.stop();
++            t.join(5000);
++            assertFalse(t.isAlive());
++        }
++    }
++
++    @Test
++    public void aDroppedConnectionIsRetried() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Heard heard = new Heard();
++            HaWatch w = new HaWatch(config(), () -> WebSocket.connect(server.uri(), 3000), heard, 50, 30_000);
++            Thread t = new Thread(w);
++            t.start();
++            try (FakeWsServer.Peer p = server.accept()) {
++                start(p, "eyJ.abc.def");
++                assertEquals("link true", heard.next());
++            }   // closed under the watcher's feet
++            assertEquals("link false", heard.next());
++            try (FakeWsServer.Peer p = server.accept()) {
++                assertNotNull(start(p, "eyJ.abc.def"));
++                assertEquals("link true", heard.next());
++                w.stop();
++            }
++            t.join(5000);
++            assertFalse(t.isAlive());
++        }
++    }
++
++    @Test
++    public void silenceIsCheckedWithAPingAndAnUnansweredOneReconnects() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Heard heard = new Heard();
++            HaWatch w = new HaWatch(config(), () -> WebSocket.connect(server.uri(), 3000), heard, 50, 300);
++            Thread t = new Thread(w);
++            t.start();
++            try (FakeWsServer.Peer p = server.accept()) {
++                start(p, "eyJ.abc.def");
++                assertEquals("link true", heard.next());
++                JSONObject ping = new JSONObject(p.readText());
++                assertEquals("ping", ping.getString("type"));
++                assertEquals("link false", heard.next());   // no pong within the next 300 ms
++            }
++            w.stop();
++            t.join(5000);
++            assertFalse(t.isAlive());
++            assertNull(heard.q.poll());
++        }
++    }
++}
+-- 
+2.54.0.windows.1
+

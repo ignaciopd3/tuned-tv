@@ -1,0 +1,393 @@
+From dd0f668c0afdb775d748d3e3487b75f02ca4ffa3 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:31:00 +0100
+Subject: [PATCH 31/32] Casa: HaWebRtc, a camera's WebRTC signalling and the
+ door-opening calls over Home Assistant
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../io/github/ignaciopd3/casa/HaWatch.java    |  19 +-
+ .../io/github/ignaciopd3/casa/HaWebRtc.java   | 194 ++++++++++++++++++
+ .../github/ignaciopd3/casa/HaWebRtcTest.java  | 125 +++++++++++
+ 3 files changed, 331 insertions(+), 7 deletions(-)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWebRtc.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWebRtcTest.java
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
+index 33e5836..b932e63 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWatch.java
+@@ -58,7 +58,7 @@ final class HaWatch implements Runnable {
+         this.quietMs = quietMs;
+     }
+ 
+-    private static final class AuthRefused extends IOException {
++    static final class AuthRefused extends IOException {
+         AuthRefused() {
+             super("token refused");
+         }
+@@ -97,12 +97,7 @@ final class HaWatch implements Runnable {
+     /** One connection, until it drops or the watcher stops. */
+     private void session(WebSocket socket) throws IOException, JSONException {
+         socket.setReadTimeout(quietMs);
+-        JSONObject hello = read(socket);
+-        if (!"auth_required".equals(hello.optString("type"))) throw new IOException("not Home Assistant");
+-        socket.send(Ha.auth(config.token));
+-        JSONObject auth = read(socket);
+-        if ("auth_invalid".equals(auth.optString("type"))) throw new AuthRefused();
+-        if (!"auth_ok".equals(auth.optString("type"))) throw new IOException("unexpected " + auth.optString("type"));
++        signIn(socket, config.token);
+         int sub;
+         synchronized (this) {
+             sub = nextId++;
+@@ -147,6 +142,16 @@ final class HaWatch implements Runnable {
+         }
+     }
+ 
++    /** Home Assistant's sign-in: auth_required, the token, then auth_ok; a refused token is AuthRefused. */
++    static void signIn(WebSocket socket, String token) throws IOException, JSONException {
++        JSONObject hello = read(socket);
++        if (!"auth_required".equals(hello.optString("type"))) throw new IOException("not Home Assistant");
++        socket.send(Ha.auth(token));
++        JSONObject auth = read(socket);
++        if ("auth_invalid".equals(auth.optString("type"))) throw new AuthRefused();
++        if (!"auth_ok".equals(auth.optString("type"))) throw new IOException("unexpected " + auth.optString("type"));
++    }
++
+     private static JSONObject read(WebSocket socket) throws IOException, JSONException {
+         String text = socket.receive();
+         if (text == null) throw new IOException("closed during sign-in");
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWebRtc.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWebRtc.java
+new file mode 100644
+index 0000000..de7a1f6
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaWebRtc.java
+@@ -0,0 +1,194 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * One doorbell card's own connection to Home Assistant: the camera's WebRTC session (client configuration, offer,
++ * session id, answer and candidates both ways, closed with unsubscribe_events) and the door-opening calls with their
++ * result. It only signals; the video itself is libwebrtc's, behind {@link Peer}, so this part is tested on its own.
++ * Our candidates made before Home Assistant has named the session wait for it.
++ */
++final class HaWebRtc {
++    interface Peer {
++        void answer(String sdp);
++
++        void remoteCandidate(String sdpMid, int sdpMLineIndex, String candidate);
++
++        void failed(String why);
++    }
++
++    interface Result {
++        void done(boolean ok);
++    }
++
++    private final WebSocket ws;
++    private final Map<Integer, Result> pending = new HashMap<>();
++    private final List<String[]> early = new ArrayList<>();   // {candidate, sdpMid, sdpMLineIndex}
++    private int nextId = 1, offerId = -1;
++    private String camera, session;
++    private Peer peer;
++    private volatile boolean closed;
++
++    private HaWebRtc(WebSocket ws) {
++        this.ws = ws;
++    }
++
++    /** Connects and signs in; the caller is on a worker thread. */
++    static HaWebRtc open(HaWatch.Connector connector, String token) throws IOException, JSONException {
++        WebSocket ws = connector.open();
++        try {
++            ws.setReadTimeout(15_000);
++            HaWatch.signIn(ws, token);
++            return new HaWebRtc(ws);
++        } catch (IOException | JSONException | RuntimeException e) {
++            ws.close();
++            throw e;
++        }
++    }
++
++    /** The ICE servers Home Assistant gives for this camera (STUN, and TURN through Nabu Casa when there is one). */
++    List<Ha.Ice> iceServers(String camera) throws IOException, JSONException {
++        int id = id();
++        ws.send(Ha.webrtcClientConfig(id, camera));
++        while (true) {
++            String text = ws.receive();
++            if (text == null) throw new IOException("closed");
++            JSONObject msg = new JSONObject(text);
++            if (msg.optInt("id") == id && "result".equals(msg.optString("type"))) {
++                if (!msg.optBoolean("success")) return new ArrayList<>();
++                JSONObject result = msg.optJSONObject("result");
++                return result == null ? new ArrayList<>() : Ha.iceServers(result);
++            }
++        }
++    }
++
++    /** Sends the offer and starts the reader thread that hands the answer and candidates to the peer. */
++    void offer(String camera, String sdp, Peer peer) throws IOException {
++        synchronized (this) {
++            this.camera = camera;
++            this.peer = peer;
++            offerId = id();
++        }
++        ws.send(Ha.webrtcOffer(offerId, camera, sdp));
++        Thread reader = new Thread(this::read, "casa-timbre-rtc");
++        reader.setDaemon(true);
++        reader.start();
++    }
++
++    /** One of our ICE candidates; held until Home Assistant has named the session. */
++    void localCandidate(String candidate, String sdpMid, int sdpMLineIndex) {
++        String s;
++        synchronized (this) {
++            if (session == null) {
++                early.add(new String[] {candidate, sdpMid, String.valueOf(sdpMLineIndex)});
++                return;
++            }
++            s = session;
++        }
++        sendCandidate(s, candidate, sdpMid, sdpMLineIndex);
++    }
++
++    /** A service call (open the door); done(ok) runs on the reader thread when Home Assistant answers. */
++    void call(String domain, String service, String entityId, Result done) {
++        int id;
++        synchronized (this) {
++            id = id();
++            pending.put(id, done);
++        }
++        try {
++            ws.send(Ha.callService(id, domain, service, entityId));
++        } catch (IOException e) {
++            synchronized (this) {
++                pending.remove(id);
++            }
++            done.done(false);
++        }
++    }
++
++    void close() {
++        if (closed) return;
++        closed = true;
++        try {
++            if (offerId >= 0) ws.send(Ha.unsubscribe(id(), offerId));
++        } catch (IOException ignored) {
++            // gone already: Home Assistant ends the session with the connection
++        }
++        ws.close();
++    }
++
++    private void read() {
++        try {
++            ws.setReadTimeout(0);
++            while (!closed) {
++                String text = ws.receive();
++                if (text == null) break;
++                JSONObject msg = new JSONObject(text);
++                int id = msg.optInt("id", -1);
++                String type = msg.optString("type");
++                if ("result".equals(type)) {
++                    Result r;
++                    synchronized (this) {
++                        r = pending.remove(id);
++                    }
++                    if (r != null) {
++                        r.done(msg.optBoolean("success"));
++                    } else if (id == offerId && !msg.optBoolean("success")) {
++                        JSONObject err = msg.optJSONObject("error");
++                        peer.failed(err == null ? "offer refused" : err.optString("code") + " " + err.optString("message"));
++                    }
++                } else if ("event".equals(type) && id == offerId) {
++                    rtcEvent(Ha.rtc(msg.getJSONObject("event")));
++                }
++            }
++        } catch (IOException | JSONException e) {
++            if (!closed) peer.failed(e.getMessage());
++        }
++    }
++
++    private void rtcEvent(Ha.Rtc r) {
++        switch (r.kind) {
++            case SESSION:
++                List<String[]> held;
++                synchronized (this) {
++                    session = r.session;
++                    held = new ArrayList<>(early);
++                    early.clear();
++                }
++                for (String[] c : held) sendCandidate(r.session, c[0], c[1], Integer.parseInt(c[2]));
++                break;
++            case ANSWER:
++                peer.answer(r.sdp);
++                break;
++            case CANDIDATE:
++                if (r.candidate != null && !r.candidate.isEmpty()) {
++                    // libwebrtc's offers name their m-lines "0", "1"…, so a missing sdpMid is the line's index
++                    String mid = r.sdpMid != null ? r.sdpMid : String.valueOf(Math.max(0, r.sdpMLineIndex));
++                    peer.remoteCandidate(mid, Math.max(0, r.sdpMLineIndex), r.candidate);
++                }
++                break;
++            case ERROR:
++                peer.failed(r.code + " " + r.message);
++                break;
++            default:
++                break;
++        }
++    }
++
++    private void sendCandidate(String s, String candidate, String sdpMid, int sdpMLineIndex) {
++        try {
++            ws.send(Ha.webrtcCandidate(id(), camera, s, candidate, sdpMid, sdpMLineIndex));
++        } catch (IOException ignored) {
++            // the reader sees the drop and tells the peer
++        }
++    }
++
++    private synchronized int id() {
++        return nextId++;
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWebRtcTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWebRtcTest.java
+new file mode 100644
+index 0000000..a8c9617
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaWebRtcTest.java
+@@ -0,0 +1,125 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertTrue;
++
++import java.util.List;
++import java.util.concurrent.BlockingQueue;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.TimeUnit;
++import org.json.JSONObject;
++import org.junit.Test;
++
++public class HaWebRtcTest {
++    static final String CAMERA = "camera.puerta_live_view";
++
++    static final class Peer implements HaWebRtc.Peer {
++        final BlockingQueue<String> q = new LinkedBlockingQueue<>();
++
++        @Override
++        public void answer(String sdp) {
++            q.add("answer " + sdp);
++        }
++
++        @Override
++        public void remoteCandidate(String sdpMid, int sdpMLineIndex, String candidate) {
++            q.add("candidate " + sdpMid + " " + sdpMLineIndex + " " + candidate);
++        }
++
++        @Override
++        public void failed(String why) {
++            q.add("failed " + why);
++        }
++
++        String next() throws InterruptedException {
++            return q.poll(5, TimeUnit.SECONDS);
++        }
++    }
++
++    @Test
++    public void theWholeSessionAsHomeAssistantSpeaksIt() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            BlockingQueue<String> serverSaw = new LinkedBlockingQueue<>();
++            Thread ha = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    p.sendText("{\"type\":\"auth_required\"}");
++                    serverSaw.add(new JSONObject(p.readText()).getString("type"));
++                    p.sendText("{\"type\":\"auth_ok\"}");
++                    JSONObject conf = new JSONObject(p.readText());
++                    serverSaw.add(conf.getString("type") + " " + conf.getString("entity_id"));
++                    p.sendText("{\"id\":" + conf.getInt("id") + ",\"type\":\"result\",\"success\":true,\"result\":"
++                            + "{\"configuration\":{\"iceServers\":[{\"urls\":\"stun:stun.home-assistant.io:3478\"}]}}}");
++                    JSONObject offer = new JSONObject(p.readText());
++                    int id = offer.getInt("id");
++                    serverSaw.add(offer.getString("type") + " " + offer.getString("offer"));
++                    p.sendText("{\"id\":" + id + ",\"type\":\"result\",\"success\":true,\"result\":null}");
++                    // a candidate of ours, made before the session id: Casa must hold it until the session arrives
++                    p.sendText("{\"id\":" + id + ",\"type\":\"event\",\"event\":{\"type\":\"session\",\"session_id\":\"01JS\"}}");
++                    JSONObject early = new JSONObject(p.readText());
++                    serverSaw.add(early.getString("type") + " " + early.getString("session_id") + " "
++                            + early.getJSONObject("candidate").getString("candidate"));
++                    p.sendText("{\"id\":" + id + ",\"type\":\"event\",\"event\":{\"type\":\"answer\",\"answer\":\"v=0 answer\"}}");
++                    p.sendText("{\"id\":" + id + ",\"type\":\"event\",\"event\":{\"type\":\"candidate\","
++                            + "\"candidate\":{\"candidate\":\"candidate:9 1 udp 1 10.0.0.9 5000 typ host\",\"sdpMLineIndex\":0}}}");
++                    JSONObject call = new JSONObject(p.readText());
++                    serverSaw.add(call.getString("type") + " " + call.getString("domain") + "." + call.getString("service"));
++                    p.sendText("{\"id\":" + call.getInt("id") + ",\"type\":\"result\",\"success\":true,\"result\":{}}");
++                    JSONObject bye = new JSONObject(p.readText());
++                    serverSaw.add(bye.getString("type") + " " + (bye.getInt("subscription") == id));
++                } catch (Exception e) {
++                    serverSaw.add("server error " + e);
++                }
++            });
++            ha.start();
++
++            Peer peer = new Peer();
++            HaWebRtc rtc = HaWebRtc.open(() -> WebSocket.connect(server.uri(), 3000), "eyJ.abc.def");
++            assertEquals("auth", serverSaw.poll(5, TimeUnit.SECONDS));
++            List<Ha.Ice> ice = rtc.iceServers(CAMERA);
++            assertEquals("camera/webrtc/get_client_config " + CAMERA, serverSaw.poll(5, TimeUnit.SECONDS));
++            assertEquals("stun:stun.home-assistant.io:3478", ice.get(0).urls.get(0));
++
++            rtc.localCandidate("candidate:1 1 udp 1 10.0.0.2 5000 typ host", "0", 0);   // before the offer even
++            rtc.offer(CAMERA, "v=0 offer", peer);
++            assertEquals("camera/webrtc/offer v=0 offer", serverSaw.poll(5, TimeUnit.SECONDS));
++            assertEquals("camera/webrtc/candidate 01JS candidate:1 1 udp 1 10.0.0.2 5000 typ host", serverSaw.poll(5, TimeUnit.SECONDS));
++            assertEquals("answer v=0 answer", peer.next());
++            assertEquals("candidate 0 0 candidate:9 1 udp 1 10.0.0.9 5000 typ host", peer.next());
++
++            BlockingQueue<Boolean> opened = new LinkedBlockingQueue<>();
++            rtc.call("lock", "open", "lock.puerta", opened::add);
++            assertEquals("call_service lock.open", serverSaw.poll(5, TimeUnit.SECONDS));
++            assertTrue(opened.poll(5, TimeUnit.SECONDS));
++
++            rtc.close();
++            assertEquals("unsubscribe_events true", serverSaw.poll(5, TimeUnit.SECONDS));
++            ha.join(5000);
++        }
++    }
++
++    @Test
++    public void aCameraErrorReachesThePeer() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Thread ha = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    p.sendText("{\"type\":\"auth_required\"}");
++                    p.readText();
++                    p.sendText("{\"type\":\"auth_ok\"}");
++                    JSONObject offer = new JSONObject(p.readText());
++                    p.sendText("{\"id\":" + offer.getInt("id") + ",\"type\":\"result\",\"success\":false,"
++                            + "\"error\":{\"code\":\"webrtc_offer_failed\",\"message\":\"Camera does not support WebRTC\"}}");
++                    p.readText();
++                } catch (Exception ignored) {
++                    // the client closes first
++                }
++            });
++            ha.start();
++            Peer peer = new Peer();
++            HaWebRtc rtc = HaWebRtc.open(() -> WebSocket.connect(server.uri(), 3000), "eyJ.abc.def");
++            rtc.offer(CAMERA, "v=0", peer);
++            assertTrue(peer.next().startsWith("failed webrtc_offer_failed"));
++            rtc.close();
++            ha.join(5000);
++        }
++    }
++}
+-- 
+2.54.0.windows.1
+

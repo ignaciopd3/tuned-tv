@@ -74,10 +74,11 @@ class Adb:
         self.wait_secs = int(os.environ.get("ADB_WAIT_SECS", "60")) if wait_secs is None else wait_secs
         self._warn = warn
 
-    def _run(self, args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    def _run(self, args: list[str], timeout: float, data: str | None = None) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
                 [*self.command, *args],
+                input=data,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -122,6 +123,11 @@ class Adb:
         if result.returncode != 0 and not result.stdout:
             raise AdbError(tr("La tele no respondió: {detail}", detail=result.stderr.strip()[:200]))
         return result.stdout.replace("\r", "")
+
+    def shell_input(self, script: str, data: str, timeout: float = 60) -> tuple[int, str]:
+        """Como shell_rc, con data por la entrada estándar: un secreto no va en la línea de órdenes ni en un archivo."""
+        result = self._run(["-s", self.serial, "shell", script], timeout=timeout, data=data)
+        return result.returncode, (result.stdout + result.stderr).replace("\r", "")
 
     def shell_rc(self, script: str, timeout: float = 300) -> tuple[int, str]:
         """Como shell, pero devuelve también el código de salida en vez de fallar (para saber si un lote se cortó)."""

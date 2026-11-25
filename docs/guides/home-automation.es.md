@@ -86,7 +86,8 @@ Además:
 
 ## Límites
 
-- Solo Smart Life / Tuya por ahora. **Home Assistant está en camino.**
+- Aquí, Smart Life / Tuya. **Con Home Assistant**, cualquier marca, y además una ventana del timbre con vídeo en
+  directo y botones para abrir el portal o la puerta: ver la [guía de Home Assistant](home-assistant.es.md).
 - Los avisos necesitan la tele encendida.
 - Casa habla inglés y español y sigue el idioma de la tele; en una tele en otro idioma sale en inglés. Las
   traducciones son bienvenidas (ver [CONTRIBUTING.es.md](../../CONTRIBUTING.es.md#traducciones)).

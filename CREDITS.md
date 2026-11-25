@@ -47,6 +47,16 @@ show `004.jpg` ("Lake Mystery, Canterbury, New Zealand 05" by Michal Klajban), `
 turquoise water pool in Luang Prabang province Laos" by Basile Morin) and crops of other wallpapers from that list,
 all CC BY-SA.
 
+## Bundled in the Casa add-on
+
+- [WebRTC Android SDK](https://github.com/webrtc-sdk/android) (BSD 3-Clause), a build of Google's
+  [libwebrtc](https://webrtc.googlesource.com/src/) (BSD 3-Clause): the doorbell card's live video.
+- [Eclipse Paho MQTT client](https://github.com/eclipse/paho.mqtt.java) (EPL 2.0 / EDL 1.0): Tuya's cloud messages.
+- The doorbell card's corner card, its hold-to-act ring and the lesson about a second video next to a playing one come
+  from cleanyourtv's **Frigate Glance** add-on by @nickld (MIT), itself after [Peek](https://github.com/casi-3/peek).
+  Home Assistant's WebSocket and WebRTC messages follow [Home Assistant](https://github.com/home-assistant/core)'s
+  code and developer docs (Apache 2.0).
+
 ## Libraries used at run time (not bundled)
 
 - [tuya-device-sharing-sdk](https://github.com/tuya/tuya-device-sharing-sdk) and
@@ -61,4 +71,6 @@ all CC BY-SA.
 
 Android TV, Google TV and Chromecast are trademarks of Google LLC. Fire TV, Fire OS, Alexa and Prime Video are
 trademarks of Amazon.com, Inc. LG and webOS are trademarks of LG Electronics. Samsung and Tizen are trademarks of
-Samsung Electronics. TCL is a trademark of TCL Corporation. Tuned TV is not affiliated with any of them.
+Samsung Electronics. TCL is a trademark of TCL Corporation. Ring is a trademark of Ring LLC, an Amazon company. Nuki is a trademark of
+Nuki Home Solutions GmbH. Home Assistant is a trademark of the Open Home Foundation. Tuned TV is not affiliated with any
+of them.

@@ -1,0 +1,793 @@
+From 73e4f6dff47ad3bae6b27155b4e6a480c89f58de Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:25:51 +0100
+Subject: [PATCH 28/32] Casa: Home Assistant's messages and the checked ha.json
+ configuration
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/io/github/ignaciopd3/casa/Ha.java    | 301 ++++++++++++++++++
+ .../io/github/ignaciopd3/casa/HaConfig.java   | 160 ++++++++++
+ .../github/ignaciopd3/casa/HaConfigTest.java  | 116 +++++++
+ .../io/github/ignaciopd3/casa/HaTest.java     | 171 ++++++++++
+ 4 files changed, 748 insertions(+)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaConfig.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaConfigTest.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
+new file mode 100644
+index 0000000..7e7a08a
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
+@@ -0,0 +1,301 @@
++package io.github.ignaciopd3.casa;
++
++import java.util.ArrayList;
++import java.util.Collection;
++import java.util.Iterator;
++import java.util.List;
++import java.util.Map;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * Home Assistant's WebSocket messages, without any network: what Casa sends (auth, subscribe_entities, call_service,
++ * WebRTC) and how it reads what comes back (the compressed entity states "a"/"c"/"r", new events, WebRTC answers).
++ * Field names from Home Assistant's websocket_api and camera/webrtc.py, read on 2026-11-25.
++ */
++final class Ha {
++    /** LockEntityFeature.OPEN: the lock can unlatch, not just unlock. */
++    private static final int LOCK_OPEN = 1;
++
++    private Ha() {
++    }
++
++    // ---- outgoing ----
++
++    static String auth(String token) {
++        return json(() -> obj().put("type", "auth").put("access_token", token));
++    }
++
++    static String subscribeEntities(int id, Collection<String> entityIds) {
++        return json(() -> msg(id, "subscribe_entities").put("entity_ids", new JSONArray(entityIds)));
++    }
++
++    static String callService(int id, String domain, String service, String entityId) {
++        return json(() -> msg(id, "call_service").put("domain", domain).put("service", service)
++                .put("target", obj().put("entity_id", entityId)));
++    }
++
++    static String ping(int id) {
++        return json(() -> msg(id, "ping"));
++    }
++
++    static String unsubscribe(int id, int subscription) {
++        return json(() -> msg(id, "unsubscribe_events").put("subscription", subscription));
++    }
++
++    static String capabilities(int id, String camera) {
++        return json(() -> msg(id, "camera/capabilities").put("entity_id", camera));
++    }
++
++    static String webrtcClientConfig(int id, String camera) {
++        return json(() -> msg(id, "camera/webrtc/get_client_config").put("entity_id", camera));
++    }
++
++    static String webrtcOffer(int id, String camera, String sdp) {
++        return json(() -> msg(id, "camera/webrtc/offer").put("entity_id", camera).put("offer", sdp));
++    }
++
++    static String webrtcCandidate(int id, String camera, String session, String candidate, String sdpMid, Integer sdpMLineIndex) {
++        return json(() -> {
++            JSONObject c = obj().put("candidate", candidate);
++            if (sdpMid != null) c.put("sdpMid", sdpMid);
++            if (sdpMLineIndex != null) c.put("sdpMLineIndex", sdpMLineIndex.intValue());
++            return msg(id, "camera/webrtc/candidate").put("entity_id", camera).put("session_id", session).put("candidate", c);
++        });
++    }
++
++    /** {domain, service} that opens with this entity: a button is pressed, a lock unlatches if it can, else unlocks. */
++    static String[] openService(String entityId, boolean lockCanOpen) {
++        if (entityId.startsWith("button.")) return new String[] {"button", "press"};
++        return new String[] {"lock", lockCanOpen ? "open" : "unlock"};
++    }
++
++    static String[] toggleService() {
++        return new String[] {"homeassistant", "toggle"};
++    }
++
++    static boolean lockCanOpen(JSONObject attributes) {
++        return attributes != null && (attributes.optInt("supported_features", 0) & LOCK_OPEN) != 0;
++    }
++
++    // ---- entity states ----
++
++    /** One entity as Casa keeps it: its state and its attributes, updated in place by apply(). */
++    static final class Entity {
++        String state;
++        JSONObject attributes = new JSONObject();
++    }
++
++    /** What one subscription event did to one entity. */
++    static final class Change {
++        final String id;
++        final boolean initial, stateChanged, removed;
++
++        Change(String id, boolean initial, boolean stateChanged, boolean removed) {
++            this.id = id;
++            this.initial = initial;
++            this.stateChanged = stateChanged;
++            this.removed = removed;
++        }
++    }
++
++    /** Applies a subscribe_entities event ("a" initial states, "c" changes, "r" removals) to the states. */
++    static List<Change> apply(Map<String, Entity> states, JSONObject event) throws JSONException {
++        List<Change> out = new ArrayList<>();
++        JSONObject added = event.optJSONObject("a");
++        if (added != null) {
++            for (Iterator<String> it = added.keys(); it.hasNext(); ) {
++                String id = it.next();
++                JSONObject s = added.getJSONObject(id);
++                Entity e = new Entity();
++                e.state = s.optString("s", null);
++                JSONObject a = s.optJSONObject("a");
++                if (a != null) e.attributes = a;
++                states.put(id, e);
++                out.add(new Change(id, true, true, false));
++            }
++        }
++        JSONObject changed = event.optJSONObject("c");
++        if (changed != null) {
++            for (Iterator<String> it = changed.keys(); it.hasNext(); ) {
++                String id = it.next();
++                JSONObject diff = changed.getJSONObject(id);
++                Entity e = states.get(id);
++                if (e == null) {
++                    e = new Entity();
++                    states.put(id, e);
++                }
++                boolean stateChanged = false;
++                JSONObject plus = diff.optJSONObject("+");
++                if (plus != null) {
++                    if (plus.has("s")) {
++                        e.state = plus.getString("s");
++                        stateChanged = true;
++                    }
++                    JSONObject a = plus.optJSONObject("a");
++                    if (a != null) {
++                        for (Iterator<String> k = a.keys(); k.hasNext(); ) {
++                            String key = k.next();
++                            e.attributes.put(key, a.get(key));
++                        }
++                    }
++                }
++                JSONObject minus = diff.optJSONObject("-");
++                JSONArray gone = minus == null ? null : minus.optJSONArray("a");
++                if (gone != null) for (int i = 0; i < gone.length(); i++) e.attributes.remove(gone.getString(i));
++                out.add(new Change(id, false, stateChanged, false));
++            }
++        }
++        JSONArray removed = event.optJSONArray("r");
++        if (removed != null) {
++            for (int i = 0; i < removed.length(); i++) {
++                String id = removed.getString(i);
++                states.remove(id);
++                out.add(new Change(id, false, false, true));
++            }
++        }
++        return out;
++    }
++
++    /**
++     * The type of a new event ("ring", "motion"…) when this change is one, else null. An event entity's state is the
++     * time of its last event: the initial state only records that time, and coming back from "unavailable" to the same
++     * time is no new event. lastEvent keeps the last time seen per entity.
++     */
++    static String newEvent(Change c, Entity e, Map<String, String> lastEvent) {
++        if (e == null || c.removed || !c.stateChanged || !looksLikeTime(e.state)) return null;
++        String before = lastEvent.put(c.id, e.state);
++        if (c.initial || e.state.equals(before)) return null;
++        return e.attributes.optString("event_type", null);
++    }
++
++    private static boolean looksLikeTime(String s) {
++        return s != null && s.length() >= 19 && Character.isDigit(s.charAt(0)) && s.charAt(10) == 'T';
++    }
++
++    static Boolean onOff(String state) {
++        if ("on".equals(state)) return Boolean.TRUE;
++        if ("off".equals(state)) return Boolean.FALSE;
++        return null;
++    }
++
++    /** A temperature in tenths of a degree, as Casa's row keeps it; null when the sensor has no number. */
++    static Integer tenths(String state) {
++        Double v = number(state);
++        return v == null ? null : (int) Math.round(v * 10);
++    }
++
++    static Integer whole(String state) {
++        Double v = number(state);
++        return v == null ? null : (int) Math.round(v);
++    }
++
++    private static Double number(String s) {
++        try {
++            return s == null ? null : Double.valueOf(s.trim());
++        } catch (NumberFormatException e) {
++            return null;
++        }
++    }
++
++    // ---- WebRTC ----
++
++    static boolean supportsWebRtc(JSONObject capabilities) {
++        JSONArray types = capabilities.optJSONArray("frontend_stream_types");
++        if (types == null) return false;
++        for (int i = 0; i < types.length(); i++) if ("web_rtc".equals(types.optString(i))) return true;
++        return false;
++    }
++
++    /** One message of a WebRTC session as Home Assistant sends it on the offer's subscription. */
++    static final class Rtc {
++        enum Kind { SESSION, ANSWER, CANDIDATE, ERROR, OTHER }
++
++        Kind kind = Kind.OTHER;
++        String session, sdp, candidate, sdpMid, code, message;
++        int sdpMLineIndex = -1;
++    }
++
++    static Rtc rtc(JSONObject event) {
++        Rtc r = new Rtc();
++        switch (event.optString("type")) {
++            case "session":
++                r.kind = Rtc.Kind.SESSION;
++                r.session = event.optString("session_id", null);
++                break;
++            case "answer":
++                r.kind = Rtc.Kind.ANSWER;
++                r.sdp = event.optString("answer", null);
++                break;
++            case "candidate":
++                r.kind = Rtc.Kind.CANDIDATE;
++                JSONObject c = event.optJSONObject("candidate");
++                if (c != null) {
++                    r.candidate = c.optString("candidate", "");
++                    r.sdpMid = c.has("sdpMid") && !c.isNull("sdpMid") ? c.optString("sdpMid") : null;
++                    r.sdpMLineIndex = c.optInt("sdpMLineIndex", -1);
++                }
++                break;
++            case "error":
++                r.kind = Rtc.Kind.ERROR;
++                r.code = event.optString("code", null);
++                r.message = event.optString("message", null);
++                break;
++            default:
++                break;
++        }
++        return r;
++    }
++
++    /** An ICE server from camera/webrtc/get_client_config. */
++    static final class Ice {
++        final List<String> urls = new ArrayList<>();
++        String username, credential;
++    }
++
++    static List<Ice> iceServers(JSONObject result) {
++        List<Ice> out = new ArrayList<>();
++        JSONObject conf = result.optJSONObject("configuration");
++        JSONArray servers = conf == null ? null : conf.optJSONArray("iceServers");
++        if (servers == null) return out;
++        for (int i = 0; i < servers.length(); i++) {
++            JSONObject s = servers.optJSONObject(i);
++            if (s == null) continue;
++            Ice ice = new Ice();
++            JSONArray many = s.optJSONArray("urls");
++            if (many != null) {
++                for (int j = 0; j < many.length(); j++) ice.urls.add(many.optString(j));
++            } else if (s.has("urls")) {
++                ice.urls.add(s.optString("urls"));
++            }
++            ice.username = s.optString("username", null);
++            ice.credential = s.optString("credential", null);
++            if (!ice.urls.isEmpty()) out.add(ice);
++        }
++        return out;
++    }
++
++    // ---- helpers ----
++
++    private static JSONObject obj() {
++        return new JSONObject();
++    }
++
++    private static JSONObject msg(int id, String type) throws JSONException {
++        return new JSONObject().put("id", id).put("type", type);
++    }
++
++    private interface Build {
++        JSONObject run() throws JSONException;
++    }
++
++    /** Android's org.json declares JSONException on put, which never happens with these keys and values. */
++    private static String json(Build b) {
++        try {
++            return b.run().toString();
++        } catch (JSONException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaConfig.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaConfig.java
+new file mode 100644
+index 0000000..0cdc180
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/HaConfig.java
+@@ -0,0 +1,160 @@
++package io.github.ignaciopd3.casa;
++
++import java.net.URI;
++import java.net.URISyntaxException;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.Iterator;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.regex.Pattern;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++/**
++ * Casa's Home Assistant configuration (ha.json from tv-opt's `run.py casa`), checked before anything uses it: the
++ * address, the token, one entity per role and the doorbells. What does not fit is refused as a whole, so a typo never
++ * leaves Casa half set up.
++ */
++final class HaConfig {
++    static final String LUZ = "luz", CALEFACTOR = "calefactor", TEMPERATURA = "temperatura", HUMEDAD = "humedad",
++            PUERTA = "puerta", GAS = "gas";
++    static final String MOTION_CAPSULE = "aviso", MOTION_VIDEO = "video", MOTION_OFF = "no";
++    static final int MAX_DOORBELLS = 4, MAX_OPENERS = 3;
++    private static final Pattern ENTITY = Pattern.compile("[a-z_]+\\.[a-z0-9_]+");
++    private static final Pattern TOKEN = Pattern.compile("[\\x21-\\x7e]{1,1024}");
++    private static final Map<String, Set<String>> ROLE_DOMAINS = new LinkedHashMap<>();
++
++    static {
++        Set<String> switches = new HashSet<>(Arrays.asList("light", "switch", "fan", "input_boolean"));
++        ROLE_DOMAINS.put(LUZ, switches);
++        ROLE_DOMAINS.put(CALEFACTOR, switches);
++        ROLE_DOMAINS.put(TEMPERATURA, Collections.singleton("sensor"));
++        ROLE_DOMAINS.put(HUMEDAD, Collections.singleton("sensor"));
++        ROLE_DOMAINS.put(PUERTA, Collections.singleton("binary_sensor"));
++        ROLE_DOMAINS.put(GAS, Collections.singleton("binary_sensor"));
++    }
++
++    static final class Doorbell {
++        final String name, ring, motion, camera;
++        final List<String> open;
++
++        Doorbell(String name, String ring, String motion, String camera, List<String> open) {
++            this.name = name;
++            this.ring = ring;
++            this.motion = motion;
++            this.camera = camera;
++            this.open = Collections.unmodifiableList(open);
++        }
++    }
++
++    final URI ws;
++    final String token, motionMode;
++    final Map<String, String> roles;
++    final List<Doorbell> doorbells;
++    final int openWindowS;
++    final boolean pause;
++
++    private HaConfig(URI ws, String token, Map<String, String> roles, List<Doorbell> doorbells, String motionMode,
++                     int openWindowS, boolean pause) {
++        this.ws = ws;
++        this.token = token;
++        this.roles = Collections.unmodifiableMap(roles);
++        this.doorbells = Collections.unmodifiableList(doorbells);
++        this.motionMode = motionMode;
++        this.openWindowS = openWindowS;
++        this.pause = pause;
++    }
++
++    static HaConfig parse(String json) throws JSONException {
++        JSONObject o = new JSONObject(json);
++        URI ws = websocketFor(o.getString("url"));
++        String token = o.getString("token");
++        if (!TOKEN.matcher(token).matches()) throw new JSONException("invalid token");
++
++        Map<String, String> roles = new LinkedHashMap<>();
++        JSONObject r = o.optJSONObject("roles");
++        if (r != null) {
++            for (Iterator<String> it = r.keys(); it.hasNext(); ) {
++                String role = it.next();
++                Set<String> domains = ROLE_DOMAINS.get(role);
++                if (domains == null) throw new JSONException("unknown role " + role);
++                roles.put(role, entity(r.getString(role), domains));
++            }
++        }
++
++        List<Doorbell> doorbells = new ArrayList<>();
++        JSONArray bells = o.optJSONArray("timbres");
++        if (bells != null) {
++            if (bells.length() > MAX_DOORBELLS) throw new JSONException("too many doorbells");
++            for (int i = 0; i < bells.length(); i++) doorbells.add(doorbell(bells.getJSONObject(i)));
++        }
++
++        String motionMode = o.optString("aviso_movimiento", MOTION_CAPSULE);
++        if (!Arrays.asList(MOTION_CAPSULE, MOTION_VIDEO, MOTION_OFF).contains(motionMode)) throw new JSONException("invalid aviso_movimiento");
++        int window = o.optInt("abrir_tras_llamada_s", 180);
++        if (window < 30 || window > 600) throw new JSONException("abrir_tras_llamada_s out of 30-600");
++        if (roles.isEmpty() && doorbells.isEmpty()) throw new JSONException("nothing to watch");
++        return new HaConfig(ws, token, roles, doorbells, motionMode, window, o.optBoolean("pausar", true));
++    }
++
++    private static Doorbell doorbell(JSONObject b) throws JSONException {
++        String name = b.getString("nombre").trim();
++        if (name.isEmpty() || name.length() > 40) throw new JSONException("invalid doorbell name");
++        String ring = entity(b.getString("llamada"), Collections.singleton("event"));
++        String motion = b.has("movimiento") ? entity(b.getString("movimiento"), new HashSet<>(Arrays.asList("event", "binary_sensor"))) : null;
++        String camera = b.has("camara") ? entity(b.getString("camara"), Collections.singleton("camera")) : null;
++        List<String> open = new ArrayList<>();
++        JSONArray a = b.optJSONArray("abrir");
++        if (a != null) {
++            if (a.length() > MAX_OPENERS) throw new JSONException("too many openers");
++            Set<String> openers = new HashSet<>(Arrays.asList("button", "lock"));
++            for (int i = 0; i < a.length(); i++) open.add(entity(a.getString(i), openers));
++        }
++        return new Doorbell(name, ring, motion, camera, open);
++    }
++
++    private static String entity(String id, Set<String> domains) throws JSONException {
++        if (!ENTITY.matcher(id).matches()) throw new JSONException("invalid entity id " + id);
++        if (!domains.contains(id.substring(0, id.indexOf('.')))) throw new JSONException("wrong domain for " + id);
++        return id;
++    }
++
++    /** http://host:port → ws://host:port/api/websocket (https → wss). Only the server's root is accepted. */
++    static URI websocketFor(String url) throws JSONException {
++        try {
++            URI u = new URI(url.trim());
++            String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
++            if (!scheme.equals("http") && !scheme.equals("https")) throw new JSONException("url must be http or https");
++            if (u.getHost() == null || u.getHost().isEmpty()) throw new JSONException("url without host");
++            String path = u.getPath() == null ? "" : u.getPath();
++            if (!path.isEmpty() && !path.equals("/")) throw new JSONException("url must be the server's root");
++            return new URI(scheme.equals("https") ? "wss" : "ws", null, u.getHost(), u.getPort(), "/api/websocket", null, null);
++        } catch (URISyntaxException e) {
++            throw new JSONException("invalid url");
++        }
++    }
++
++    /** The role of an entity, or null when it is not one of the roles. */
++    String roleOf(String entityId) {
++        for (Map.Entry<String, String> e : roles.entrySet()) if (e.getValue().equals(entityId)) return e.getKey();
++        return null;
++    }
++
++    /** Everything Casa subscribes to: the roles, each doorbell's ring and motion, and its locks (for lock.open). */
++    Set<String> entityIds() {
++        Set<String> ids = new LinkedHashSet<>(roles.values());
++        for (Doorbell d : doorbells) {
++            ids.add(d.ring);
++            if (d.motion != null) ids.add(d.motion);
++            for (String e : d.open) if (e.startsWith("lock.")) ids.add(e);
++        }
++        return ids;
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaConfigTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaConfigTest.java
+new file mode 100644
+index 0000000..d483e97
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaConfigTest.java
+@@ -0,0 +1,116 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++import org.junit.Test;
++
++public class HaConfigTest {
++    static final String SAMPLE = "{\"url\":\"http://192.168.1.10:8123\",\"token\":\"eyJ.abc.def\","
++            + "\"roles\":{\"luz\":\"light.salon\",\"calefactor\":\"switch.calefactor\",\"temperatura\":\"sensor.salon_temperatura\","
++            + "\"humedad\":\"sensor.salon_humedad\",\"puerta\":\"binary_sensor.puerta_entrada\",\"gas\":\"binary_sensor.gas\"},"
++            + "\"timbres\":[{\"nombre\":\"Puerta\",\"llamada\":\"event.puerta_ding\",\"movimiento\":\"event.puerta_motion\","
++            + "\"camara\":\"camera.puerta_live_view\",\"abrir\":[\"lock.puerta\"]},"
++            + "{\"nombre\":\"Portal\",\"llamada\":\"event.portal_ding\",\"abrir\":[\"button.portal_open_door\"]}],"
++            + "\"aviso_movimiento\":\"aviso\",\"abrir_tras_llamada_s\":180,\"pausar\":true}";
++
++    @Test
++    public void theDesignsExampleIsAccepted() throws Exception {
++        HaConfig c = HaConfig.parse(SAMPLE);
++        assertEquals("ws://192.168.1.10:8123/api/websocket", c.ws.toString());
++        assertEquals("eyJ.abc.def", c.token);
++        assertEquals("light.salon", c.roles.get("luz"));
++        assertEquals(2, c.doorbells.size());
++        HaConfig.Doorbell door = c.doorbells.get(0);
++        assertEquals("Puerta", door.name);
++        assertEquals("event.puerta_ding", door.ring);
++        assertEquals("event.puerta_motion", door.motion);
++        assertEquals("camera.puerta_live_view", door.camera);
++        assertEquals(1, door.open.size());
++        assertNull(c.doorbells.get(1).camera);
++        assertEquals("aviso", c.motionMode);
++        assertEquals(180, c.openWindowS);
++        assertTrue(c.pause);
++        assertEquals("luz", c.roleOf("light.salon"));
++        assertNull(c.roleOf("light.otra"));
++        assertTrue(c.entityIds().contains("event.portal_ding"));
++        assertTrue(c.entityIds().contains("lock.puerta"));   // to know whether lock.open is supported
++        assertFalse(c.entityIds().contains("camera.puerta_live_view"));   // cameras are asked for when needed
++    }
++
++    @Test
++    public void httpsBecomesWssAndDefaultsApply() throws Exception {
++        HaConfig c = HaConfig.parse("{\"url\":\"https://casa.example.org\",\"token\":\"t\",\"roles\":{\"luz\":\"light.a\"}}");
++        assertEquals("wss://casa.example.org/api/websocket", c.ws.toString());
++        assertEquals("aviso", c.motionMode);
++        assertEquals(180, c.openWindowS);
++        assertTrue(c.pause);
++        assertTrue(c.doorbells.isEmpty());
++    }
++
++    @Test
++    public void whatDoesNotFitIsRefused() throws Exception {
++        refuse(with("url", "ftp://x"));
++        refuse(with("url", "http://"));
++        refuse(with("url", "http://h:8123/lovelace"));
++        refuse(with("token", ""));
++        refuse(with("token", "a b"));
++        refuse(roles("luz", "Light.Salon"));
++        refuse(roles("luz", "sensor.t"));
++        refuse(roles("temperatura", "binary_sensor.x"));
++        refuse(roles("puerta", "sensor.x"));
++        refuse(roles("desconocido", "light.x"));
++        refuse(doorbell("llamada", "binary_sensor.ding"));
++        refuse(doorbell("camara", "image.x"));
++        refuse(doorbell("abrir", new JSONArray().put("switch.x")));
++        refuse(doorbell("abrir", new JSONArray().put("lock.a").put("lock.b").put("lock.c").put("lock.d")));
++        refuse(doorbell("movimiento", "sensor.m"));
++        refuse(doorbell("nombre", ""));
++        refuse(with("aviso_movimiento", "siempre"));
++        refuse(with("abrir_tras_llamada_s", 10));
++        refuse(with("abrir_tras_llamada_s", 900));
++        JSONObject five = new JSONObject(SAMPLE);
++        JSONArray bells = five.getJSONArray("timbres");
++        for (int i = 0; i < 3; i++) bells.put(new JSONObject().put("nombre", "T" + i).put("llamada", "event.t" + i));
++        refuse(five.toString());
++        JSONObject noBell = new JSONObject(SAMPLE);
++        noBell.getJSONArray("timbres").getJSONObject(0).remove("llamada");
++        refuse(noBell.toString());
++    }
++
++    @Test
++    public void aMotionBinarySensorIsAcceptedToo() throws Exception {
++        HaConfig.parse(doorbell("movimiento", "binary_sensor.entrada_movimiento"));
++    }
++
++    private static String with(String key, Object value) throws JSONException {
++        return new JSONObject(SAMPLE).put(key, value).toString();
++    }
++
++    private static String roles(String role, String entity) throws JSONException {
++        JSONObject o = new JSONObject(SAMPLE);
++        o.getJSONObject("roles").put(role, entity);
++        return o.toString();
++    }
++
++    private static String doorbell(String key, Object value) throws JSONException {
++        JSONObject o = new JSONObject(SAMPLE);
++        o.getJSONArray("timbres").getJSONObject(0).put(key, value);
++        return o.toString();
++    }
++
++    private static void refuse(String json) {
++        try {
++            HaConfig.parse(json);
++            fail("should be refused: " + json);
++        } catch (JSONException expected) {
++            // refused, as it should
++        }
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
+new file mode 100644
+index 0000000..fd24130
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
+@@ -0,0 +1,171 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++
++import java.util.Arrays;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++import org.json.JSONArray;
++import org.json.JSONObject;
++import org.junit.Test;
++
++public class HaTest {
++    @Test
++    public void outgoingMessagesHaveHomeAssistantsFieldNames() throws Exception {
++        JSONObject auth = new JSONObject(Ha.auth("tok"));
++        assertEquals("auth", auth.getString("type"));
++        assertEquals("tok", auth.getString("access_token"));
++
++        JSONObject sub = new JSONObject(Ha.subscribeEntities(3, Arrays.asList("light.salon", "event.puerta_ding")));
++        assertEquals(3, sub.getInt("id"));
++        assertEquals("subscribe_entities", sub.getString("type"));
++        assertEquals(new JSONArray(Arrays.asList("light.salon", "event.puerta_ding")).toString(), sub.getJSONArray("entity_ids").toString());
++
++        JSONObject call = new JSONObject(Ha.callService(4, "lock", "open", "lock.puerta"));
++        assertEquals("call_service", call.getString("type"));
++        assertEquals("lock", call.getString("domain"));
++        assertEquals("open", call.getString("service"));
++        assertEquals("lock.puerta", call.getJSONObject("target").getString("entity_id"));
++
++        assertEquals("ping", new JSONObject(Ha.ping(5)).getString("type"));
++        JSONObject unsub = new JSONObject(Ha.unsubscribe(6, 2));
++        assertEquals("unsubscribe_events", unsub.getString("type"));
++        assertEquals(2, unsub.getInt("subscription"));
++    }
++
++    @Test
++    public void openingUsesThePressOrTheLockServiceThatFits() {
++        assertEquals("button/press", String.join("/", Ha.openService("button.portal_open_door", false)));
++        assertEquals("lock/open", String.join("/", Ha.openService("lock.puerta", true)));
++        assertEquals("lock/unlock", String.join("/", Ha.openService("lock.puerta", false)));
++        assertEquals("homeassistant/toggle", String.join("/", Ha.toggleService()));
++    }
++
++    @Test
++    public void lockOpenIsSupportedWhenTheFeatureBitIsSet() throws Exception {
++        assertTrue(Ha.lockCanOpen(new JSONObject("{\"supported_features\":1}")));
++        assertFalse(Ha.lockCanOpen(new JSONObject("{\"supported_features\":0}")));
++        assertFalse(Ha.lockCanOpen(new JSONObject("{}")));
++    }
++
++    @Test
++    public void initialStatesThenChangesThenRemovals() throws Exception {
++        Map<String, Ha.Entity> states = new HashMap<>();
++        List<Ha.Change> first = Ha.apply(states, new JSONObject("{\"a\":{"
++                + "\"light.salon\":{\"s\":\"on\",\"a\":{\"friendly_name\":\"Salón\",\"brightness\":200},\"lc\":1.0},"
++                + "\"sensor.t\":{\"s\":\"21.46\",\"a\":{\"unit_of_measurement\":\"°C\"}}}}"));
++        assertEquals(2, first.size());
++        assertTrue(first.get(0).initial);
++        assertEquals("on", states.get("light.salon").state);
++        assertEquals("Salón", states.get("light.salon").attributes.getString("friendly_name"));
++
++        List<Ha.Change> changed = Ha.apply(states, new JSONObject("{\"c\":{\"light.salon\":"
++                + "{\"+\":{\"s\":\"off\",\"lc\":2.0},\"-\":{\"a\":[\"brightness\"]}}}}"));
++        assertEquals(1, changed.size());
++        assertFalse(changed.get(0).initial);
++        assertTrue(changed.get(0).stateChanged);
++        assertEquals("off", states.get("light.salon").state);
++        assertFalse(states.get("light.salon").attributes.has("brightness"));
++        assertEquals("Salón", states.get("light.salon").attributes.getString("friendly_name"));
++
++        List<Ha.Change> attrsOnly = Ha.apply(states, new JSONObject("{\"c\":{\"sensor.t\":{\"+\":{\"a\":{\"x\":1}}}}}"));
++        assertFalse(attrsOnly.get(0).stateChanged);
++        assertEquals("21.46", states.get("sensor.t").state);
++
++        List<Ha.Change> removed = Ha.apply(states, new JSONObject("{\"r\":[\"sensor.t\"]}"));
++        assertTrue(removed.get(0).removed);
++        assertFalse(states.containsKey("sensor.t"));
++    }
++
++    @Test
++    public void anEventFiresOnlyOnANewTimeNeverOnTheInitialStateOrAComeback() throws Exception {
++        Map<String, Ha.Entity> states = new HashMap<>();
++        Map<String, String> last = new HashMap<>();
++        String id = "event.puerta_ding";
++        for (Ha.Change c : Ha.apply(states, new JSONObject("{\"a\":{\"event.puerta_ding\":{\"s\":\"2026-11-25T10:00:00.000+00:00\","
++                + "\"a\":{\"event_type\":\"ring\",\"device_class\":\"doorbell\"}}}}"))) {
++            assertNull(Ha.newEvent(c, states.get(c.id), last));   // the last ring before we connected: not now
++        }
++        Ha.Change ring = Ha.apply(states, new JSONObject("{\"c\":{\"event.puerta_ding\":{\"+\":"
++                + "{\"s\":\"2026-11-25T21:47:12.000+00:00\",\"lu\":3.0}}}}")).get(0);
++        assertEquals("ring", Ha.newEvent(ring, states.get(id), last));
++
++        Ha.Change gone = Ha.apply(states, new JSONObject("{\"c\":{\"event.puerta_ding\":{\"+\":{\"s\":\"unavailable\"}}}}")).get(0);
++        assertNull(Ha.newEvent(gone, states.get(id), last));
++        Ha.Change back = Ha.apply(states, new JSONObject("{\"c\":{\"event.puerta_ding\":{\"+\":"
++                + "{\"s\":\"2026-11-25T21:47:12.000+00:00\"}}}}")).get(0);
++        assertNull(Ha.newEvent(back, states.get(id), last));   // the same ring again after a blip: not new
++
++        Ha.Change motion = Ha.apply(states, new JSONObject("{\"c\":{\"event.puerta_ding\":{\"+\":"
++                + "{\"s\":\"2026-11-25T21:50:00.000+00:00\",\"a\":{\"event_type\":\"motion\"}}}}}")).get(0);
++        assertEquals("motion", Ha.newEvent(motion, states.get(id), last));
++    }
++
++    @Test
++    public void readingsForTheRolesFollowTheStates() {
++        assertEquals(Boolean.TRUE, Ha.onOff("on"));
++        assertEquals(Boolean.FALSE, Ha.onOff("off"));
++        assertNull(Ha.onOff("unavailable"));
++        assertEquals(Integer.valueOf(215), Ha.tenths("21.46"));
++        assertEquals(Integer.valueOf(-35), Ha.tenths("-3.5"));
++        assertNull(Ha.tenths("unknown"));
++        assertEquals(Integer.valueOf(64), Ha.whole("63.6"));
++        assertNull(Ha.whole(""));
++    }
++
++    @Test
++    public void webRtcMessagesBothWays() throws Exception {
++        JSONObject offer = new JSONObject(Ha.webrtcOffer(7, "camera.puerta_live_view", "v=0\r\n"));
++        assertEquals("camera/webrtc/offer", offer.getString("type"));
++        assertEquals("camera.puerta_live_view", offer.getString("entity_id"));
++        assertEquals("v=0\r\n", offer.getString("offer"));
++
++        JSONObject cand = new JSONObject(Ha.webrtcCandidate(8, "camera.puerta_live_view", "01J", "candidate:1 1 udp 1 10.0.0.2 5000 typ host", "0", 0));
++        assertEquals("camera/webrtc/candidate", cand.getString("type"));
++        assertEquals("01J", cand.getString("session_id"));
++        assertEquals("candidate:1 1 udp 1 10.0.0.2 5000 typ host", cand.getJSONObject("candidate").getString("candidate"));
++        assertEquals("0", cand.getJSONObject("candidate").getString("sdpMid"));
++        assertEquals(0, cand.getJSONObject("candidate").getInt("sdpMLineIndex"));
++
++        assertEquals("camera/webrtc/get_client_config", new JSONObject(Ha.webrtcClientConfig(9, "camera.x")).getString("type"));
++
++        Ha.Rtc session = Ha.rtc(new JSONObject("{\"type\":\"session\",\"session_id\":\"01J\"}"));
++        assertEquals(Ha.Rtc.Kind.SESSION, session.kind);
++        assertEquals("01J", session.session);
++        Ha.Rtc answer = Ha.rtc(new JSONObject("{\"type\":\"answer\",\"answer\":\"v=0\\r\\n\"}"));
++        assertEquals(Ha.Rtc.Kind.ANSWER, answer.kind);
++        assertEquals("v=0\r\n", answer.sdp);
++        Ha.Rtc remote = Ha.rtc(new JSONObject("{\"type\":\"candidate\",\"candidate\":{\"candidate\":\"candidate:2\",\"sdpMLineIndex\":1}}"));
++        assertEquals(Ha.Rtc.Kind.CANDIDATE, remote.kind);
++        assertEquals("candidate:2", remote.candidate);
++        assertEquals(1, remote.sdpMLineIndex);
++        assertNull(remote.sdpMid);
++        Ha.Rtc error = Ha.rtc(new JSONObject("{\"type\":\"error\",\"code\":\"webrtc_offer_failed\",\"message\":\"no\"}"));
++        assertEquals(Ha.Rtc.Kind.ERROR, error.kind);
++        assertEquals("webrtc_offer_failed", error.code);
++    }
++
++    @Test
++    public void iceServersComeFromTheClientConfiguration() throws Exception {
++        List<Ha.Ice> ice = Ha.iceServers(new JSONObject("{\"configuration\":{\"iceServers\":["
++                + "{\"urls\":\"stun:stun.home-assistant.io:3478\"},"
++                + "{\"urls\":[\"turn:t.example:3478\",\"turns:t.example:5349\"],\"username\":\"u\",\"credential\":\"c\"}]}}"));
++        assertEquals(2, ice.size());
++        assertEquals(Arrays.asList("stun:stun.home-assistant.io:3478"), ice.get(0).urls);
++        assertEquals(2, ice.get(1).urls.size());
++        assertEquals("u", ice.get(1).username);
++        assertEquals("c", ice.get(1).credential);
++        assertTrue(Ha.iceServers(new JSONObject("{}")).isEmpty());
++    }
++
++    @Test
++    public void webRtcIsOfferedOnlyWhenTheCameraSaysSo() throws Exception {
++        assertTrue(Ha.supportsWebRtc(new JSONObject("{\"frontend_stream_types\":[\"hls\",\"web_rtc\"]}")));
++        assertFalse(Ha.supportsWebRtc(new JSONObject("{\"frontend_stream_types\":[\"hls\"]}")));
++        assertEquals("camera/capabilities", new JSONObject(Ha.capabilities(1, "camera.x")).getString("type"));
++    }
++}
+-- 
+2.54.0.windows.1
+

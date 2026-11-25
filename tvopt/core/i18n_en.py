@@ -388,6 +388,55 @@ Entorno: ADB (ruta a adb), TV_SERIAL (ip:puerto).
   not touched.
 Environment: ADB (path to adb), TV_SERIAL (ip:port).
 """,
+    # ---- Casa con Home Assistant (run.py casa)
+    "Casa con Home Assistant: conectar, descubrir, enviar y probar el timbre": (
+        "Casa with Home Assistant: connect, discover, send and test the doorbell"
+    ),
+    "ACCIÓN": "ACTION",
+    "conectar, descubrir, enviar o probar": "connect, discover, send or test",
+    "Dirección de Home Assistant (p. ej. http://192.168.1.10:8123): ": (
+        "Home Assistant address (e.g. http://192.168.1.10:8123): "
+    ),
+    "Token de larga duración (no se ve al escribirlo): ": "Long-lived access token (hidden as you type): ",
+    "Conectado a Home Assistant {version}; guardado en {path}": (
+        "Connected to Home Assistant {version}; saved in {path}"
+    ),
+    "Ya tenías papeles: la propuesta va aparte, en {path}; pasa a ha.json lo que quieras": (
+        "You already had roles: the proposal is saved apart, in {path}; copy what you want into ha.json"
+    ),
+    "Propuesta guardada en {path}:": "Proposal saved in {path}:",
+    "Revísala antes de enviarla: quita lo que no quieras y mira qué abre cada timbre": (
+        "Check it before sending it: remove what you don't want and look at what each doorbell opens"
+    ),
+    "conectada": "connected",
+    "aún sin conectar (la tele tiene que llegar a la dirección)": "not connected yet (the TV must reach the address)",
+    "Casa tiene la configuración ({doorbells} timbres); Home Assistant: {linked}": (
+        "Casa has the configuration ({doorbells} doorbells); Home Assistant: {linked}"
+    ),
+    "Timbre simulado en la tele: debería salir el aviso (Atrás lo cierra)": (
+        "Test ring sent to the TV: the doorbell card should show (Back closes it)"
+    ),
+    "La dirección de Home Assistant es la raíz, p. ej. http://192.168.1.10:8123 (no {url})": (
+        "Home Assistant's address is the server's root, e.g. http://192.168.1.10:8123 (not {url})"
+    ),
+    "Home Assistant rechazó el token: crea uno nuevo en tu perfil, Seguridad": (
+        "Home Assistant refused the token: create a new one in your profile, Security"
+    ),
+    "Home Assistant respondió {code} a {path}": "Home Assistant answered {code} to {path}",
+    "No llego a Home Assistant en {url}: {detail}": "Can't reach Home Assistant at {url}: {detail}",
+    "  {role}: {entity} ({name})": "  {role}: {entity} ({name})",
+    "llamada {entity}": "ring {entity}",
+    "movimiento {entity}": "motion {entity}",
+    "cámara {entity}": "camera {entity}",
+    "abre {entity}": "opens {entity}",
+    "  timbre «{name}»: {parts}": '  doorbell "{name}": {parts}',
+    "Falta conectar con Home Assistant: run.py casa conectar": "Connect to Home Assistant first: run.py home connect",
+    "No hay nada que enviar: run.py casa descubrir propone los papeles": (
+        "Nothing to send: run.py home discover proposes the roles"
+    ),
+    "Casa no aceptó la configuración (¿Casa instalada y al día?): {detail}": (
+        "Casa did not take the configuration (is Casa installed and up to date?): {detail}"
+    ),
 }
 
 # Los textos propios de argparse, en español (en inglés salen tal cual).

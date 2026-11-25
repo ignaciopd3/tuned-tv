@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # para tvopt.core.i18n al lanzarlo como script
 from tvopt.core.i18n import tr  # noqa: E402
+from tvopt.integrations.casa.ha import inside_repo  # noqa: E402
 
 USAGE = """Uso:
   casa_probe.py login <código>   código de usuario de Smart Life (Yo > Ajustes > Cuenta y seguridad); deja qr.png
@@ -38,12 +39,6 @@ HOME = Path(os.environ.get("CASA_DIR", Path.home() / "Documents" / "casa-tuya"))
 SESSION, DEVICES, QR_PNG = HOME / "sesion.json", HOME / "aparatos.json", HOME / "qr.png"
 # Registro público de Home Assistant en el sistema de compartir aparatos de Tuya (homeassistant/components/tuya).
 CLIENT_ID, SCHEMA = "HA_3y9q4ak7g4ephrvke", "haauthorize"
-REPO = Path(__file__).resolve().parents[1]
-
-
-def inside_repo(path):
-    path = Path(path).resolve()
-    return REPO == path or REPO in path.parents
 
 
 def qr_payload(token):

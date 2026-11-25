@@ -1,0 +1,147 @@
+From 3d40a2a493d297d98d3f984e96f4fc75e4178b6b Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:26:45 +0100
+Subject: [PATCH 29/32] Casa: the doorbell card's rules (open only after a real
+ ring, close after 90 s, motion, pause)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../github/ignaciopd3/casa/DoorbellRules.java | 62 +++++++++++++++++++
+ .../ignaciopd3/casa/DoorbellRulesTest.java    | 56 +++++++++++++++++
+ 2 files changed, 118 insertions(+)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorbellRules.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/DoorbellRulesTest.java
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorbellRules.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorbellRules.java
+new file mode 100644
+index 0000000..4a2cde9
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/DoorbellRules.java
+@@ -0,0 +1,62 @@
++package io.github.ignaciopd3.casa;
++
++/**
++ * When the doorbell card may open a door, when it goes away by itself and what motion does, with the times passed in
++ * so the rules are tested without a clock. Opening needs a real ring in the last few minutes (abrir_tras_llamada_s) and
++ * OK held for 1.5 s; the card closes 90 s after the last ring or key press.
++ */
++final class DoorbellRules {
++    static final long CLOSE_AFTER_MS = 90_000, MOTION_VIDEO_MS = 20_000, HOLD_MS = 1_500;
++
++    enum Motion { NONE, CAPSULE, VIDEO }
++
++    private final long openWindowMs;
++    private long lastRingAt, lastActivityAt;
++
++    /** ringAt is the ring the card opened for, or -1 when it opened to look at the door. */
++    DoorbellRules(int openWindowS, long ringAt, long now) {
++        this.openWindowMs = openWindowS * 1000L;
++        this.lastRingAt = ringAt;
++        this.lastActivityAt = now;
++    }
++
++    void onRing(long now) {
++        lastRingAt = now;
++        lastActivityAt = now;
++    }
++
++    void onKey(long now) {
++        lastActivityAt = now;
++    }
++
++    boolean canOpen(long now) {
++        return lastRingAt >= 0 && now - lastRingAt <= openWindowMs;
++    }
++
++    long closeAt() {
++        return lastActivityAt + CLOSE_AFTER_MS;
++    }
++
++    boolean shouldClose(long now) {
++        return now >= closeAt();
++    }
++
++    /** A video over a playing video can stall it (one decoder on many TVs), so motion then only gets the capsule. */
++    static Motion onMotion(String mode, boolean mediaPlaying) {
++        if (HaConfig.MOTION_OFF.equals(mode)) return Motion.NONE;
++        if (HaConfig.MOTION_VIDEO.equals(mode) && !mediaPlaying) return Motion.VIDEO;
++        return Motion.CAPSULE;
++    }
++
++    static boolean shouldPause(boolean pauseWanted, boolean mediaPlaying) {
++        return pauseWanted && mediaPlaying;
++    }
++
++    static boolean holdOpens(long heldMs) {
++        return heldMs >= HOLD_MS;
++    }
++
++    static float holdProgress(long heldMs) {
++        return Math.min(1f, Math.max(0f, heldMs / (float) HOLD_MS));
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/DoorbellRulesTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/DoorbellRulesTest.java
+new file mode 100644
+index 0000000..673106c
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/DoorbellRulesTest.java
+@@ -0,0 +1,56 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++
++public class DoorbellRulesTest {
++    @Test
++    public void openingIsOfferedOnlyForAWhileAfterARealRing() {
++        DoorbellRules r = new DoorbellRules(180, -1, 0);
++        assertFalse(r.canOpen(5_000));   // looking at the door without a ring
++        r.onRing(10_000);
++        assertTrue(r.canOpen(20_000));
++        assertTrue(r.canOpen(190_000));
++        assertFalse(r.canOpen(190_001));
++        assertTrue(new DoorbellRules(180, 50_000, 60_000).canOpen(60_000));   // the card opened for a ring 10 s ago
++    }
++
++    @Test
++    public void theCardClosesNinetySecondsAfterTheLastRingOrPress() {
++        DoorbellRules r = new DoorbellRules(180, 0, 0);
++        assertFalse(r.shouldClose(89_999));
++        assertTrue(r.shouldClose(90_000));
++        r.onKey(80_000);
++        assertFalse(r.shouldClose(169_999));
++        r.onRing(100_000);
++        assertFalse(r.shouldClose(189_999));
++        assertTrue(r.shouldClose(190_000));
++        assertEquals(190_000, r.closeAt());
++    }
++
++    @Test
++    public void motionFollowsTheSettingAndNeverFightsAPlayingVideo() {
++        assertEquals(DoorbellRules.Motion.CAPSULE, DoorbellRules.onMotion(HaConfig.MOTION_CAPSULE, false));
++        assertEquals(DoorbellRules.Motion.VIDEO, DoorbellRules.onMotion(HaConfig.MOTION_VIDEO, false));
++        assertEquals(DoorbellRules.Motion.CAPSULE, DoorbellRules.onMotion(HaConfig.MOTION_VIDEO, true));
++        assertEquals(DoorbellRules.Motion.NONE, DoorbellRules.onMotion(HaConfig.MOTION_OFF, false));
++    }
++
++    @Test
++    public void pauseOnlyWhenSomethingPlaysAndItIsWanted() {
++        assertTrue(DoorbellRules.shouldPause(true, true));
++        assertFalse(DoorbellRules.shouldPause(true, false));
++        assertFalse(DoorbellRules.shouldPause(false, true));
++    }
++
++    @Test
++    public void holdingOkOpensAtOneAndAHalfSeconds() {
++        assertFalse(DoorbellRules.holdOpens(1_499));
++        assertTrue(DoorbellRules.holdOpens(1_500));
++        assertEquals(0.5f, DoorbellRules.holdProgress(750), 0.001f);
++        assertEquals(1f, DoorbellRules.holdProgress(4_000), 0.001f);
++    }
++}
+-- 
+2.54.0.windows.1
+

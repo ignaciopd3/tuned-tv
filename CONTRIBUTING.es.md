@@ -140,6 +140,18 @@ uv run python -m tvopt.core.privacy
   `git format-patch` a `launcher/patches/`, manteniendo la numeración. Lo que no sea propio de Tuned TV, mándalo también
   a cleanyourtv.
 
+## Domótica y el timbre
+
+La parte de Home Assistant de Casa ([guía](docs/guides/home-assistant.es.md)) es experimental: aún no ha visto un
+timbre de verdad. Lo que más ayuda:
+
+- **Un informe de prueba** en una issue: el timbre o la cámara (marca, modelo), la cerradura o el telefonillo, tu
+  versión de Home Assistant, la tele y qué funcionó (la ventana, el vídeo, el sonido, abrir). Tapa direcciones y tokens.
+- **Código**, como en los complementos: Java en un clon de cleanyourtv (`addons/casa`), una prueba de JVM para cada
+  pieza que no necesita pantalla (`./gradlew testReleaseUnitTest`) y después `git format-patch` a `launcher/patches/`.
+  Las pruebas simulan Home Assistant (`FakeWsServer`), así que nadie necesita un timbre para cambiar la lógica.
+- **El aspecto de la ventana** se elige antes en una maqueta; `TimbreCard` es la única clase que sabe su forma.
+
 ## Traducciones
 
 Todo lo que sale en la tele sigue el idioma de la tele. El inglés es el idioma por defecto y el español está

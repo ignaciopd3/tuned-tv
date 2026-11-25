@@ -1,0 +1,576 @@
+From a2fe32811f6101a214851e7917c503d598c3b868 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:23:18 +0100
+Subject: [PATCH 27/32] Casa: a small WebSocket client (RFC 6455) for Home
+ Assistant's API
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../io/github/ignaciopd3/casa/WebSocket.java  | 216 ++++++++++++++++++
+ .../github/ignaciopd3/casa/FakeWsServer.java  | 136 +++++++++++
+ .../github/ignaciopd3/casa/WebSocketTest.java | 187 +++++++++++++++
+ 3 files changed, 539 insertions(+)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/WebSocket.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FakeWsServer.java
+ create mode 100644 addons/casa/app/src/test/java/io/github/ignaciopd3/casa/WebSocketTest.java
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/WebSocket.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/WebSocket.java
+new file mode 100644
+index 0000000..24716cd
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/WebSocket.java
+@@ -0,0 +1,216 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.BufferedInputStream;
++import java.io.ByteArrayOutputStream;
++import java.io.Closeable;
++import java.io.DataInputStream;
++import java.io.IOException;
++import java.io.OutputStream;
++import java.net.InetSocketAddress;
++import java.net.Socket;
++import java.net.URI;
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.security.SecureRandom;
++import java.util.Base64;
++import javax.net.ssl.SSLSocket;
++import javax.net.ssl.SSLSocketFactory;
++
++/**
++ * A small WebSocket client (RFC 6455), enough for Home Assistant's API: text messages both ways, fragments joined,
++ * pings answered, the client always masking. wss uses the system's certificate authorities only, like the rest of
++ * Casa. One thread reads (receive); any thread may send.
++ */
++final class WebSocket implements Closeable {
++    private static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
++    static final int MAX_MESSAGE = 4 << 20;
++    private static final int OP_CONT = 0x0, OP_TEXT = 0x1, OP_BINARY = 0x2, OP_CLOSE = 0x8, OP_PING = 0x9, OP_PONG = 0xA;
++
++    private final Socket socket;
++    private final DataInputStream in;
++    private final OutputStream out;
++    private final SecureRandom random = new SecureRandom();
++    private boolean closeSent;
++
++    private WebSocket(Socket socket) throws IOException {
++        this.socket = socket;
++        this.in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
++        this.out = socket.getOutputStream();
++    }
++
++    /** Opens ws://host:port/path or wss://…; an answer that is not a proper upgrade is an IOException. */
++    static WebSocket connect(URI uri, int timeoutMs) throws IOException {
++        String scheme = uri.getScheme();
++        boolean tls = "wss".equalsIgnoreCase(scheme);
++        if (!tls && !"ws".equalsIgnoreCase(scheme)) throw new IOException("not a WebSocket address: " + scheme);
++        String host = uri.getHost();
++        int port = uri.getPort() > 0 ? uri.getPort() : (tls ? 443 : 80);
++        Socket s;
++        if (tls) {
++            Socket plain = new Socket();
++            plain.connect(new InetSocketAddress(host, port), timeoutMs);
++            SSLSocket ssl = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(plain, host, port, true);
++            ssl.startHandshake();
++            s = ssl;
++        } else {
++            s = new Socket();
++            s.connect(new InetSocketAddress(host, port), timeoutMs);
++        }
++        s.setTcpNoDelay(true);
++        s.setSoTimeout(timeoutMs);
++        WebSocket ws = new WebSocket(s);
++        try {
++            ws.handshake(uri, host, port);
++        } catch (IOException e) {
++            ws.close();
++            throw e;
++        }
++        s.setSoTimeout(0);
++        return ws;
++    }
++
++    /** Sec-WebSocket-Accept for a key: base64(sha1(key + the RFC's GUID)). */
++    static String acceptFor(String key) {
++        try {
++            byte[] sha = MessageDigest.getInstance("SHA-1").digest((key + GUID).getBytes(StandardCharsets.US_ASCII));
++            return Base64.getEncoder().encodeToString(sha);
++        } catch (NoSuchAlgorithmException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    private void handshake(URI uri, String host, int port) throws IOException {
++        byte[] nonce = new byte[16];
++        random.nextBytes(nonce);
++        String key = Base64.getEncoder().encodeToString(nonce);
++        String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
++        if (uri.getRawQuery() != null) path += "?" + uri.getRawQuery();
++        String request = "GET " + path + " HTTP/1.1\r\nHost: " + host + ":" + port + "\r\nUpgrade: websocket\r\n"
++                + "Connection: Upgrade\r\nSec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\n\r\n";
++        out.write(request.getBytes(StandardCharsets.US_ASCII));
++        out.flush();
++        String status = readLine();
++        if (!status.startsWith("HTTP/1.1 101")) throw new IOException("no upgrade: " + status);
++        String accept = null;
++        for (String line = readLine(); !line.isEmpty(); line = readLine()) {
++            int colon = line.indexOf(':');
++            if (colon > 0 && line.substring(0, colon).trim().equalsIgnoreCase("Sec-WebSocket-Accept")) {
++                accept = line.substring(colon + 1).trim();
++            }
++        }
++        if (!acceptFor(key).equals(accept)) throw new IOException("wrong Sec-WebSocket-Accept");
++    }
++
++    private String readLine() throws IOException {
++        ByteArrayOutputStream b = new ByteArrayOutputStream();
++        for (int c = in.read(); c != '\n'; c = in.read()) {
++            if (c == -1) throw new IOException("connection closed during the handshake");
++            if (c != '\r') b.write(c);
++            if (b.size() > 8192) throw new IOException("header line too long");
++        }
++        return b.toString("US-ASCII");
++    }
++
++    /** Waiting longer than this for a message throws SocketTimeoutException; 0 waits forever. */
++    void setReadTimeout(int ms) throws IOException {
++        socket.setSoTimeout(ms);
++    }
++
++    void send(String text) throws IOException {
++        frame(OP_TEXT, text.getBytes(StandardCharsets.UTF_8));
++    }
++
++    /** The next whole text message, or null once the server has closed the connection. */
++    String receive() throws IOException {
++        ByteArrayOutputStream message = new ByteArrayOutputStream();
++        boolean inMessage = false;
++        while (true) {
++            int b0 = in.readUnsignedByte(), b1 = in.readUnsignedByte();
++            boolean fin = (b0 & 0x80) != 0;
++            int op = b0 & 0x0f;
++            long n = b1 & 0x7f;
++            if (n == 126) n = in.readUnsignedShort();
++            else if (n == 127) n = in.readLong();
++            if (n < 0 || n > MAX_MESSAGE || message.size() + n > MAX_MESSAGE) throw new IOException("message too large");
++            byte[] mask = null;
++            if ((b1 & 0x80) != 0) {   // servers must not mask; read it anyway rather than fail
++                mask = new byte[4];
++                in.readFully(mask);
++            }
++            byte[] payload = new byte[(int) n];
++            in.readFully(payload);
++            if (mask != null) for (int i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
++            switch (op) {
++                case OP_PING:
++                    frame(OP_PONG, payload);
++                    break;
++                case OP_PONG:
++                    break;
++                case OP_CLOSE:
++                    synchronized (this) {
++                        if (!closeSent) frame(OP_CLOSE, payload.length >= 2 ? new byte[] {payload[0], payload[1]} : new byte[0]);
++                        closeSent = true;
++                    }
++                    return null;
++                case OP_TEXT:
++                case OP_BINARY:
++                case OP_CONT:
++                    if (op != OP_CONT) {
++                        if (inMessage) throw new IOException("new message inside a fragmented one");
++                        inMessage = true;
++                    } else if (!inMessage) {
++                        throw new IOException("continuation without a message");
++                    }
++                    message.write(payload);
++                    if (fin) return message.toString("UTF-8");
++                    break;
++                default:
++                    throw new IOException("unknown opcode " + op);
++            }
++        }
++    }
++
++    private synchronized void frame(int op, byte[] payload) throws IOException {
++        int n = payload.length;
++        ByteArrayOutputStream f = new ByteArrayOutputStream(n + 14);
++        f.write(0x80 | op);
++        if (n < 126) {
++            f.write(0x80 | n);
++        } else if (n < 65536) {
++            f.write(0x80 | 126);
++            f.write(n >>> 8);
++            f.write(n);
++        } else {
++            f.write(0x80 | 127);
++            for (int i = 7; i >= 0; i--) f.write((int) ((long) n >>> (8 * i)));
++        }
++        byte[] mask = new byte[4];
++        random.nextBytes(mask);
++        f.write(mask);
++        byte[] masked = new byte[n];
++        for (int i = 0; i < n; i++) masked[i] = (byte) (payload[i] ^ mask[i & 3]);
++        f.write(masked);
++        out.write(f.toByteArray());
++        out.flush();
++    }
++
++    @Override
++    public void close() {
++        synchronized (this) {
++            if (!closeSent && !socket.isClosed()) {
++                try {
++                    frame(OP_CLOSE, new byte[] {0x03, (byte) 0xE8});
++                } catch (IOException ignored) {
++                    // the connection is already gone
++                }
++                closeSent = true;
++            }
++        }
++        try {
++            socket.close();
++        } catch (IOException ignored) {
++            // nothing left to release
++        }
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FakeWsServer.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FakeWsServer.java
+new file mode 100644
+index 0000000..f028edb
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/FakeWsServer.java
+@@ -0,0 +1,136 @@
++package io.github.ignaciopd3.casa;
++
++import java.io.ByteArrayOutputStream;
++import java.io.DataInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.InetAddress;
++import java.net.ServerSocket;
++import java.net.Socket;
++import java.net.URI;
++import java.nio.charset.StandardCharsets;
++
++/** A one-client WebSocket server for the tests: the RFC 6455 handshake, then frames written and read by hand. */
++final class FakeWsServer implements AutoCloseable {
++    final ServerSocket server;
++
++    FakeWsServer() throws IOException {
++        server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
++        server.setSoTimeout(5000);
++    }
++
++    URI uri() {
++        return URI.create("ws://127.0.0.1:" + server.getLocalPort() + "/api/websocket");
++    }
++
++    /** Waits for the client and answers its handshake; the request line and headers are kept for checks. */
++    Peer accept() throws IOException {
++        Socket s = server.accept();
++        s.setSoTimeout(5000);
++        Peer p = new Peer(s);
++        String line;
++        String key = null;
++        StringBuilder request = new StringBuilder();
++        while (!(line = p.readLine()).isEmpty()) {
++            request.append(line).append('\n');
++            if (line.toLowerCase().startsWith("sec-websocket-key:")) key = line.substring(18).trim();
++        }
++        p.request = request.toString();
++        String reply = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
++                + "Sec-WebSocket-Accept: " + WebSocket.acceptFor(key) + "\r\n\r\n";
++        p.out.write(reply.getBytes(StandardCharsets.US_ASCII));
++        p.out.flush();
++        return p;
++    }
++
++    @Override
++    public void close() throws IOException {
++        server.close();
++    }
++
++    static final class Frame {
++        final int opcode;
++        final boolean fin, masked;
++        final byte[] payload;
++
++        Frame(int opcode, boolean fin, boolean masked, byte[] payload) {
++            this.opcode = opcode;
++            this.fin = fin;
++            this.masked = masked;
++            this.payload = payload;
++        }
++
++        String text() {
++            return new String(payload, StandardCharsets.UTF_8);
++        }
++    }
++
++    static final class Peer implements AutoCloseable {
++        final Socket socket;
++        final DataInputStream in;
++        final OutputStream out;
++        String request;
++
++        Peer(Socket socket) throws IOException {
++            this.socket = socket;
++            InputStream raw = socket.getInputStream();
++            this.in = new DataInputStream(raw);
++            this.out = socket.getOutputStream();
++        }
++
++        String readLine() throws IOException {
++            ByteArrayOutputStream b = new ByteArrayOutputStream();
++            int c;
++            while ((c = in.read()) != -1 && c != '\n') if (c != '\r') b.write(c);
++            return b.toString("US-ASCII");
++        }
++
++        /** A server frame: never masked, as the RFC asks. */
++        void sendFrame(int opcode, boolean fin, byte[] payload) throws IOException {
++            ByteArrayOutputStream f = new ByteArrayOutputStream();
++            f.write((fin ? 0x80 : 0) | opcode);
++            int n = payload.length;
++            if (n < 126) {
++                f.write(n);
++            } else if (n < 65536) {
++                f.write(126);
++                f.write(n >>> 8);
++                f.write(n);
++            } else {
++                f.write(127);
++                for (int i = 7; i >= 0; i--) f.write((int) ((long) n >>> (8 * i)));
++            }
++            f.write(payload);
++            out.write(f.toByteArray());
++            out.flush();
++        }
++
++        void sendText(String s) throws IOException {
++            sendFrame(0x1, true, s.getBytes(StandardCharsets.UTF_8));
++        }
++
++        Frame readFrame() throws IOException {
++            int b0 = in.readUnsignedByte(), b1 = in.readUnsignedByte();
++            long n = b1 & 0x7f;
++            if (n == 126) n = in.readUnsignedShort();
++            else if (n == 127) n = in.readLong();
++            byte[] mask = new byte[4];
++            boolean masked = (b1 & 0x80) != 0;
++            if (masked) in.readFully(mask);
++            byte[] p = new byte[(int) n];
++            in.readFully(p);
++            if (masked) for (int i = 0; i < p.length; i++) p[i] ^= mask[i & 3];
++            return new Frame(b0 & 0x0f, (b0 & 0x80) != 0, masked, p);
++        }
++
++        String readText() throws IOException {
++            return readFrame().text();
++        }
++
++        @Override
++        public void close() throws IOException {
++            socket.close();
++        }
++    }
++}
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/WebSocketTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/WebSocketTest.java
+new file mode 100644
+index 0000000..702db08
+--- /dev/null
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/WebSocketTest.java
+@@ -0,0 +1,187 @@
++package io.github.ignaciopd3.casa;
++
++import static org.junit.Assert.assertArrayEquals;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.fail;
++
++import java.io.IOException;
++import java.net.URI;
++import java.nio.charset.StandardCharsets;
++import java.util.Arrays;
++import org.junit.Test;
++
++public class WebSocketTest {
++    @Test
++    public void acceptKeyIsTheOneInTheRfc() {
++        // RFC 6455, section 1.3
++        assertEquals("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", WebSocket.acceptFor("dGhlIHNhbXBsZSBub25jZQ=="));
++    }
++
++    @Test
++    public void handshakeAsksForAnUpgradeOnThePath() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Thread t = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    assertTrue(p.request.startsWith("GET /api/websocket HTTP/1.1"));
++                    assertTrue(p.request.contains("Upgrade: websocket"));
++                    assertTrue(p.request.contains("Sec-WebSocket-Version: 13"));
++                    p.sendText("hola");
++                } catch (IOException e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ws = WebSocket.connect(server.uri(), 3000)) {
++                assertEquals("hola", ws.receive());
++            }
++            t.join();
++        }
++    }
++
++    @Test
++    public void textsOfEveryLengthGoBothWaysAndTheClientMasks() throws Exception {
++        String shortText = "{\"type\":\"auth\"}";
++        String medium = repeat('m', 126);
++        String big = repeat('b', 70_000);
++        try (FakeWsServer server = new FakeWsServer()) {
++            final String[] got = new String[3];
++            final boolean[] masked = new boolean[3];
++            Thread t = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    for (int i = 0; i < 3; i++) {
++                        FakeWsServer.Frame f = p.readFrame();
++                        got[i] = f.text();
++                        masked[i] = f.masked;
++                    }
++                    p.sendText(shortText);
++                    p.sendText(medium);
++                    p.sendText(big);
++                } catch (IOException e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ws = WebSocket.connect(server.uri(), 3000)) {
++                ws.send(shortText);
++                ws.send(medium);
++                ws.send(big);
++                assertEquals(shortText, ws.receive());
++                assertEquals(medium, ws.receive());
++                assertEquals(big, ws.receive());
++            }
++            t.join();
++            assertEquals(shortText, got[0]);
++            assertEquals(medium, got[1]);
++            assertEquals(big, got[2]);
++            assertTrue(masked[0] && masked[1] && masked[2]);
++        }
++    }
++
++    @Test
++    public void fragmentsArriveAsOneMessageAndPingsArePonged() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            final FakeWsServer.Frame[] pong = new FakeWsServer.Frame[1];
++            Thread t = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    p.sendFrame(0x1, false, "{\"a\":".getBytes(StandardCharsets.UTF_8));
++                    p.sendFrame(0x9, true, new byte[] {1, 2, 3});   // a ping between fragments, as the RFC allows
++                    p.sendFrame(0x0, false, "{\"b\":".getBytes(StandardCharsets.UTF_8));
++                    p.sendFrame(0x0, true, "1}}".getBytes(StandardCharsets.UTF_8));
++                    pong[0] = p.readFrame();
++                } catch (IOException e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ws = WebSocket.connect(server.uri(), 3000)) {
++                assertEquals("{\"a\":{\"b\":1}}", ws.receive());
++                t.join();
++            }
++            assertEquals(0xA, pong[0].opcode);
++            assertArrayEquals(new byte[] {1, 2, 3}, pong[0].payload);
++        }
++    }
++
++    @Test
++    public void aCloseFromTheServerEndsWithNullAndIsAnswered() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            final FakeWsServer.Frame[] answer = new FakeWsServer.Frame[1];
++            Thread t = new Thread(() -> {
++                try (FakeWsServer.Peer p = server.accept()) {
++                    p.sendFrame(0x8, true, new byte[] {0x03, (byte) 0xE8});   // 1000, normal closure
++                    answer[0] = p.readFrame();
++                } catch (IOException e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ws = WebSocket.connect(server.uri(), 3000)) {
++                assertNull(ws.receive());
++                t.join();
++            }
++            assertEquals(0x8, answer[0].opcode);
++        }
++    }
++
++    @Test
++    public void aDroppedConnectionIsAnIoException() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Thread t = new Thread(() -> {
++                try {
++                    server.accept().close();
++                } catch (IOException e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ws = WebSocket.connect(server.uri(), 3000)) {
++                t.join();
++                ws.receive();
++                fail("a dropped connection must throw");
++            } catch (IOException expected) {
++                // the watcher reconnects on this
++            }
++        }
++    }
++
++    @Test
++    public void aWrongAcceptKeyIsRefused() throws Exception {
++        try (FakeWsServer server = new FakeWsServer()) {
++            Thread t = new Thread(() -> {
++                try (java.net.Socket s = server.server.accept()) {
++                    new FakeWsServer.Peer(s).readLine();
++                    s.getOutputStream().write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
++                            + "Connection: Upgrade\r\nSec-WebSocket-Accept: wrong=\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
++                    Thread.sleep(200);
++                } catch (Exception e) {
++                    throw new RuntimeException(e);
++                }
++            });
++            t.start();
++            try (WebSocket ignored = WebSocket.connect(server.uri(), 3000)) {
++                fail("a wrong accept key must be refused");
++            } catch (IOException expected) {
++                // not a WebSocket server, or a proxy in the way
++            }
++            t.join();
++        }
++    }
++
++    @Test
++    public void onlyWsAndWssAreAccepted() {
++        try {
++            WebSocket.connect(URI.create("http://127.0.0.1:1/api/websocket"), 1000);
++            fail("http is not a WebSocket address");
++        } catch (IOException expected) {
++            // HaConfig turns http into ws before this
++        }
++    }
++
++    private static String repeat(char c, int n) {
++        char[] a = new char[n];
++        Arrays.fill(a, c);
++        return new String(a);
++    }
++}
+-- 
+2.54.0.windows.1
+

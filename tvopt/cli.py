@@ -141,6 +141,70 @@ def launcher(profile_id: str, build_only: bool, force: bool) -> int:
         return 1
 
 
+def casa(action: str, serial: str | None) -> int:
+    """Casa con Home Assistant: conectar, proponer los papeles, enviarlos a la tele y probar el aviso del timbre."""
+    from getpass import getpass
+
+    from tvopt.integrations.casa import ha
+
+    try:
+        if action in ("conectar", "connect"):
+            config = ha.load()
+            url = input(tr("Dirección de Home Assistant (p. ej. http://192.168.1.10:8123): ")).strip()
+            token = getpass(tr("Token de larga duración (no se ve al escribirlo): ")).strip()
+            api = ha.HaApi(url or str(config.get("url", "")), token)
+            version = api.version()
+            config.update({"url": api.url, "token": token})
+            print(tr("Conectado a Home Assistant {version}; guardado en {path}", version=version, path=ha.save(config)))
+            return 0
+        if action in ("descubrir", "discover"):
+            config = ha.load()
+            if not config.get("url") or not config.get("token"):
+                raise ha.HaError(tr("Falta conectar con Home Assistant: run.py casa conectar"))
+            states = ha.HaApi(str(config["url"]), str(config["token"])).states()
+            proposal = ha.propose(states)
+            if config.get("roles") or config.get("timbres"):
+                target = ha.save(proposal, ha.config_path().with_name("ha.propuesta.json"))
+                print(
+                    tr(
+                        "Ya tenías papeles: la propuesta va aparte, en {path}; pasa a ha.json lo que quieras",
+                        path=target,
+                    )
+                )
+            else:
+                config.update(proposal)
+                print(tr("Propuesta guardada en {path}:", path=ha.save(config)))
+            for line in ha.describe(proposal, states):
+                print(line)
+            print(tr("Revísala antes de enviarla: quita lo que no quieras y mira qué abre cada timbre"))
+            return 0
+        serial = serial or os.environ.get("TV_SERIAL")
+        if not serial:
+            print(tr("Indica la tele con --serial <ip:puerto> o la variable TV_SERIAL"), file=sys.stderr)
+            return 2
+        adb = Adb(serial)
+        adb.connect()
+        if action in ("enviar", "send"):
+            got = ha.push(adb, ha.load())
+            linked = (
+                tr("conectada") if got["linked"] else tr("aún sin conectar (la tele tiene que llegar a la dirección)")
+            )
+            print(
+                tr(
+                    "Casa tiene la configuración ({doorbells} timbres); Home Assistant: {linked}",
+                    doorbells=got["doorbells"],
+                    linked=linked,
+                )
+            )
+        else:
+            ha.simulate(adb, "timbre")
+            print(tr("Timbre simulado en la tele: debería salir el aviso (Atrás lo cierra)"))
+        return 0
+    except (ha.HaError, AdbError) as e:
+        print(e, file=sys.stderr)
+        return 1
+
+
 def _names(spanish: str, english: str) -> tuple[str, str]:
     """Las dos formas de una opción valen siempre; la ayuda enseña primero la del idioma de quien la lee."""
     return (english, spanish) if language() == "en" else (spanish, english)
@@ -195,6 +259,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=tr("recompila y reinstala aunque no haya cambios"),
     )
+    home = sub.add_parser(
+        "casa", aliases=["home"], help=tr("Casa con Home Assistant: conectar, descubrir, enviar y probar el timbre")
+    )
+    home.add_argument(
+        "accion",
+        metavar=tr("ACCIÓN"),
+        choices=["conectar", "descubrir", "enviar", "probar", "connect", "discover", "send", "test"],
+        help=tr("conectar, descubrir, enviar o probar"),
+    )
+    home.add_argument("--serial", help=tr("ip:puerto de la tele (por defecto, la variable TV_SERIAL)"))
     return parser
 
 
@@ -218,4 +292,6 @@ def main(argv: list[str] | None = None) -> int:
         return resultados(parsed.perfil)
     if parsed.orden == "launcher":
         return launcher(parsed.perfil, parsed.solo_compilar, parsed.forzar)
+    if parsed.orden in ("casa", "home"):
+        return casa(parsed.accion, parsed.serial)
     return 2

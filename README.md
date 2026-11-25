@@ -67,7 +67,9 @@ Tuned TV switches it off with the TV's own developer tools, one reviewed step at
 
 With the **Casa** add-on and Smart Life / Tuya devices, the TV alerts you about the door and the gas over whatever you
 are watching, and switches the light or the heater from the home screen or a remote button. Step by step in the
-[smart home guide](docs/guides/home-automation.md). Home Assistant support is on the way.
+[smart home guide](docs/guides/home-automation.md). With [Home Assistant](docs/guides/home-assistant.md), any
+brand works, and a doorbell card shows who is at the door with live video and opens the gate or the door
+(experimental).
 
 > [!NOTE]
 > **You need smart devices.** Each feature comes with its own, compatible with Smart Life / Tuya: a Wi-Fi plug for the

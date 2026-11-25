@@ -87,7 +87,8 @@ Also:
 
 ## Limits
 
-- Smart Life / Tuya only for now. **Home Assistant support is on the way.**
+- Smart Life / Tuya here. **With Home Assistant**, any brand, plus a doorbell card with live video and buttons to
+  open the gate or the door: see the [Home Assistant guide](home-assistant.md).
 - Alerts need the TV to be on.
 - Casa speaks English and Spanish and follows the TV's language; on a TV in another language it shows English.
   Translations are welcome (see [CONTRIBUTING.md](../../CONTRIBUTING.md#translations)).

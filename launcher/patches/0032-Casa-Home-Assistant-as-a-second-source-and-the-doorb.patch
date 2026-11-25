@@ -1,0 +1,1750 @@
+From 5917c2ce51bcd125f4e7b25c3485d9067f775df3 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 12:37:23 +0100
+Subject: [PATCH 32/32] Casa: Home Assistant as a second source and the doorbell card
+ with live video
+
+HaWatch feeds the same roles and messages as Tuya's cloud; the yellow key switches through Home Assistant when the
+light is there. A ring opens the doorbell card (TimbreService in its own :timbre process, libwebrtc over Home
+Assistant's WebRTC, buttons held 1.5 s to open, only after a real ring); motion shows the small capsule or a muted
+card. ConfigProvider takes ha.json from tv-opt's run.py casa send.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ addons/casa/README.md                         |  40 +-
+ addons/casa/app/build.gradle                  |  10 +-
+ addons/casa/app/proguard-rules.pro            |   3 +
+ addons/casa/app/src/main/AndroidManifest.xml  |  28 +-
+ .../github/ignaciopd3/casa/CasaService.java   | 212 ++++++++-
+ .../ignaciopd3/casa/ConfigProvider.java       |  73 ++++
+ .../io/github/ignaciopd3/casa/Devices.java    |  20 +-
+ .../ignaciopd3/casa/ImportActivity.java       |   5 +-
+ .../ignaciopd3/casa/TimbreActivity.java       |  20 +
+ .../io/github/ignaciopd3/casa/TimbreCard.java | 409 ++++++++++++++++++
+ .../github/ignaciopd3/casa/TimbreClient.java  |  92 ++++
+ .../github/ignaciopd3/casa/TimbreService.java | 231 ++++++++++
+ .../github/ignaciopd3/casa/TimbreVideo.java   | 184 ++++++++
+ .../github/ignaciopd3/casa/ToggleService.java |   4 +-
+ .../app/src/main/res/drawable/ic_bell.xml     |   7 +
+ .../app/src/main/res/drawable/ic_close.xml    |   7 +
+ .../casa/app/src/main/res/drawable/ic_key.xml |   7 +
+ .../app/src/main/res/drawable/ic_motion.xml   |   7 +
+ .../app/src/main/res/drawable/ic_portal.xml   |   7 +
+ .../app/src/main/res/values-es/strings.xml    |  27 ++
+ .../casa/app/src/main/res/values/strings.xml  |  27 ++
+ 21 files changed, 1395 insertions(+), 25 deletions(-)
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ConfigProvider.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreActivity.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreClient.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
+ create mode 100644 addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreVideo.java
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_bell.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_close.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_key.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_motion.xml
+ create mode 100644 addons/casa/app/src/main/res/drawable/ic_portal.xml
+
+diff --git a/addons/casa/README.md b/addons/casa/README.md
+index 71427a4..d07516e 100644
+--- a/addons/casa/README.md
++++ b/addons/casa/README.md
+@@ -1,23 +1,43 @@
+ # Casa
+ 
+-Switches Tuya / Smart Life plugs over the home network, with no cloud and no voice: the launcher's yellow button
+-(`app_keys`) opens `LuzActivity`, which flips the living-room light's plug and closes. `CalefactorActivity` does the
+-same for the heater. Built for one home (tv-opt's TCL C845 profile); not part of the shared add-ons.
++The home on the TV, with no voice assistant: the launcher's row (light, heater, temperature and humidity), the yellow
++button that switches the light, door and gas messages over whatever is on screen, and a doorbell card with live video
++and buttons to open the gate or the door. Two sources, which can live side by side:
++
++- **Smart Life / Tuya directly**: plugs over the home network (no cloud), sensors through Tuya's cloud.
++- **Home Assistant**: any brand Home Assistant knows (Ring, Nuki, Reolink, Aqara, Hue…), over its WebSocket API.
++
++Built with tv-opt (`run.py casa` sets up Home Assistant from the PC); see tv-opt's `docs/guides/home-assistant.md`.
+ 
+ | Piece | What it does |
+ |---|---|
+ | `Frames` | Tuya LAN frames for protocols 3.3 (AES-ECB, CRC32) and 3.5 (AES-GCM, session key), ported from tinytuya and checked byte for byte against frames it builds (`FramesTest`, `vectors.json` from tv-opt's `tools/casa_vectors.py`, fake key) |
+ | `TuyaLocal` | One TCP conversation with a plug (port 6668): reads and flips data point 1 |
+-| `Devices` | Each plug's id, local key, address and protocol, kept in private preferences only |
+-| `ImportActivity` | Takes that configuration from the PC once (`tools/casa_probe.py push` in tv-opt) |
+-| `LuzActivity`, `CalefactorActivity`, `ToggleService` | The switches; a short message only when a plug does not answer |
++| `Devices` | Each plug's id, local key, address and protocol, the TV's Tuya session and Home Assistant's configuration, kept in private preferences only |
++| `ImportActivity` | Takes the Tuya configuration from the PC (`tools/casa_probe.py push` in tv-opt); `--es simulate …` tests the messages and the doorbell card |
++| `LuzActivity`, `CalefactorActivity`, `ToggleService` | The switches (Tuya on the home network, or `homeassistant.toggle`); a short message only when it fails |
++| `WebSocket` | A small RFC 6455 client: text both ways, fragments, pings, masking (`WebSocketTest`) |
++| `Ha`, `HaConfig` | Home Assistant's messages (sign-in, `subscribe_entities`, `call_service`, WebRTC) and the checked `ha.json` |
++| `HaWatch` | The live line to Home Assistant: only the configured entities, pushed by the server, ping on silence, retry from 2 s to 1 min |
++| `ConfigProvider` | Takes `ha.json` from the PC with `content write` (a file, never a command line) and answers `/status` |
++| `DoorbellRules` | Opening only within a few minutes of a real ring, OK held 1.5 s, the card closing 90 s after the last ring or press, motion |
++| `TimbreClient`, `TimbreService`, `TimbreCard`, `TimbreVideo`, `HaWebRtc` | The doorbell card in its own process (`:timbre`, which ends with the card): window, live video through libwebrtc over Home Assistant's WebRTC, the opening calls, pausing what was playing |
++| `TimbreActivity` | "Look at the door" from a remote key (`app_keys`) |
+ 
+ ## Permissions
+ 
+ | Permission | Why |
+ |---|---|
+-| `INTERNET` | Talking to the plugs on the home network (nothing goes to the internet) |
+-| `io.github.ignaciopd3.casa.permission.CONTROL` (own, signature) | Only apps signed with the same key, the launcher, may open the switches |
+-| `android.permission.DUMP` on `ImportActivity` | Only the ADB shell and the system can hand over the configuration |
++| `INTERNET` | The plugs on the home network, Tuya's cloud for the sensors, and your Home Assistant; nothing else |
++| `SYSTEM_ALERT_WINDOW` | The door, gas and doorbell messages over any channel or app (granted from the PC) |
++| `ACCESS_NETWORK_STATE`, `MODIFY_AUDIO_SETTINGS` | libwebrtc watches the network and routes the doorbell's sound (normal permissions) |
++| `io.github.ignaciopd3.casa.permission.CONTROL` (own, signature) | Only apps signed with the same key, the launcher, may open the switches and the doorbell |
++| `android.permission.DUMP` on `ImportActivity`, `WRITE_SECURE_SETTINGS` on `ConfigProvider` | Only the ADB shell can hand over a configuration |
++
++The local keys and Home Assistant's token never leave the TV's private storage (backups are off), never reach the log,
++and are never in this repository. The microphone is never used: the doorbell card only receives video and sound.
++
++## Size and memory
+ 
+-The local keys never leave the TV's private storage, never reach the log, and are never in this repository.
++libwebrtc adds about 7 MB (32-bit ARM) and 12 MB (64-bit ARM) to the APK. It is only loaded in the `:timbre` process,
++which exists while a doorbell card shows, so Casa's own process stays as small as before.
+diff --git a/addons/casa/app/build.gradle b/addons/casa/app/build.gradle
+index 83214af..cdec952 100644
+--- a/addons/casa/app/build.gradle
++++ b/addons/casa/app/build.gradle
+@@ -10,8 +10,12 @@ android {
+         applicationId 'io.github.ignaciopd3.casa'
+         minSdk 26
+         targetSdk 34
+-        versionCode 1
+-        versionName '0.1'
++        versionCode 2
++        versionName '0.2'
++        // libwebrtc ships native code for four ABIs; TVs are 32- or 64-bit ARM.
++        ndk {
++            abiFilters 'armeabi-v7a', 'arm64-v8a'
++        }
+     }
+ 
+     buildTypes {
+@@ -32,6 +36,8 @@ android {
+ dependencies {
+     // Tuya's MQTT reports (the door, the climate, the plugs): plain Java, no Android service.
+     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
++    // Google's libwebrtc, built by webrtc-sdk (BSD-3): the doorbell's live video over Home Assistant.
++    implementation 'io.github.webrtc-sdk:android:150.7871.04'
+     testImplementation 'junit:junit:4.13.2'
+     // Android's own org.json is a stub in JVM tests.
+     testImplementation 'org.json:json:20231013'
+diff --git a/addons/casa/app/proguard-rules.pro b/addons/casa/app/proguard-rules.pro
+index 1475c2e..ba29b2c 100644
+--- a/addons/casa/app/proguard-rules.pro
++++ b/addons/casa/app/proguard-rules.pro
+@@ -3,3 +3,6 @@
+ # Paho loads its network modules and messages by name.
+ -keep class org.eclipse.paho.client.mqttv3.** { *; }
+ -dontwarn org.eclipse.paho.client.mqttv3.**
++# libwebrtc calls back into its Java classes from native code by name.
++-keep class org.webrtc.** { *; }
++-dontwarn org.webrtc.**
+diff --git a/addons/casa/app/src/main/AndroidManifest.xml b/addons/casa/app/src/main/AndroidManifest.xml
+index f1d0d5c..a25fa96 100644
+--- a/addons/casa/app/src/main/AndroidManifest.xml
++++ b/addons/casa/app/src/main/AndroidManifest.xml
+@@ -3,8 +3,11 @@
+ 
+     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+ 
+-    <!-- Talking to the smart plugs over the home network (Tuya LAN protocol, port 6668). -->
++    <!-- Talking to the smart plugs over the home network (Tuya LAN protocol, port 6668) and to Home Assistant. -->
+     <uses-permission android:name="android.permission.INTERNET" />
++    <!-- libwebrtc, for the doorbell's live video: it watches the network and sets the audio route (normal permissions). -->
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+     <!-- The door and gas messages over any channel or app; granted from the PC (appops). -->
+     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+ 
+@@ -54,6 +57,29 @@
+             android:exported="true"
+             android:permission="io.github.ignaciopd3.casa.permission.CONTROL" />
+ 
++        <!-- tv-opt's `run.py casa send` writes Home Assistant's ha.json here with `content write` (a file, never a command
++             line) and reads /status. WRITE_SECURE_SETTINGS is held by the ADB shell only. -->
++        <provider
++            android:name=".ConfigProvider"
++            android:authorities="io.github.ignaciopd3.casa.config"
++            android:exported="true"
++            android:permission="android.permission.WRITE_SECURE_SETTINGS" />
++
++        <!-- The doorbell card, in its own process so libwebrtc's memory ends with the card. Casa binds it. -->
++        <service
++            android:name=".TimbreService"
++            android:process=":timbre"
++            android:exported="false" />
++
++        <!-- "Look at the door" from a remote key (launcher app_keys); only the launcher may open it. -->
++        <activity
++            android:name=".TimbreActivity"
++            android:exported="true"
++            android:permission="io.github.ignaciopd3.casa.permission.CONTROL"
++            android:excludeFromRecents="true"
++            android:noHistory="true"
++            android:taskAffinity="" />
++
+         <!-- The launcher row reads the state here; only apps with the signature permission (the launcher) can. -->
+         <provider
+             android:name=".CasaProvider"
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+index c5793ae..cb9b158 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+@@ -5,23 +5,30 @@ import android.content.BroadcastReceiver;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.IntentFilter;
++import android.media.AudioManager;
+ import android.net.Uri;
++import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.IBinder;
+ import android.os.Looper;
++import android.widget.Toast;
+ import java.security.SecureRandom;
++import java.util.Arrays;
++import java.util.HashMap;
+ import java.util.LinkedHashMap;
+ import java.util.Map;
+ import org.json.JSONException;
++import org.json.JSONObject;
+ 
+ /**
+- * Casa running: the cloud (status at start-up, then MQTT), the gas sensor on the home network, the door messages and
++ * Casa running: the cloud (status at start-up, then MQTT), the gas sensor on the home network, Home Assistant when it
++ * is set up (HaWatch: the same roles and messages, plus the doorbells' card through TimbreClient), the door messages and
+  * the state the launcher row reads (CasaProvider). The launcher keeps it alive by binding to it for as long as its
+  * process lives, which on a TV is always: TCL forbids an app started in the background from going foreground
+  * (TclAppBoot "start_foreground ... default_borbid"), so a foreground service is not an option here. The other parts
+  * of Casa talk to it in-process (running()), never by asking the system to start it from the background.
+  */
+-public class CasaService extends Service implements MqttWatch.Listener, GasWatch.Listener {
++public class CasaService extends Service implements MqttWatch.Listener, GasWatch.Listener, HaWatch.Listener {
+     static final Uri NOW = Uri.parse("content://io.github.ignaciopd3.casa.now/now");
+     private static final long WARN_AFTER_MS = 5 * 60_000L, HEALTH_EVERY_MS = 60_000L;
+ 
+@@ -34,8 +41,14 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+     private MqttWatch mqtt;
+     private GasWatch gasWatch;
+     private String lastGas;
+-    private long cloudDownSince, gasDownSince;
+-    private boolean cloudWarned, gasWarned, doorKnown;
++    private long cloudDownSince, gasDownSince, haDownSince;
++    private boolean cloudWarned, gasWarned, haWarned, doorKnown, tuyaUp;
++    private volatile boolean haUp;
++    private volatile HaConfig ha;
++    private volatile HaWatch haWatch;
++    private final Map<String, JSONObject> haAttrs = new HashMap<>();
++    private long[] lastRing = new long[0];
++    private TimbreClient timbre;
+ 
+     private final Runnable doorTick = new Runnable() {
+         @Override
+@@ -86,6 +99,7 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         super.onCreate();
+         running = this;
+         overlay = new Overlay(this);
++        timbre = new TimbreClient(this);
+         registerReceiver(screenOn, new IntentFilter(Intent.ACTION_SCREEN_ON));
+         startWatchers();
+         main.postDelayed(health, HEALTH_EVERY_MS);
+@@ -122,13 +136,28 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+             mqtt = new MqttWatch(api, roleById, this);
+             new Thread(mqtt, "casa-cloud").start();
+         }
++        HaConfig c = Devices.loadHa(this);
++        ha = c;
++        haAttrs.clear();
++        lastRing = new long[c == null ? 0 : c.doorbells.size()];
++        Arrays.fill(lastRing, -1);
++        if (c != null) {
++            haDownSince = System.currentTimeMillis();   // warned about if it never connects
++            haWarned = false;
++            HaWatch w = new HaWatch(c, () -> WebSocket.connect(c.ws, 10_000), this);
++            haWatch = w;
++            new Thread(w, "casa-ha").start();
++        }
+     }
+ 
+     private void stopWatchers() {
+         if (mqtt != null) mqtt.stop();
+         if (gasWatch != null) gasWatch.stop();
++        if (haWatch != null) haWatch.stop();
+         mqtt = null;
+         gasWatch = null;
++        haWatch = null;
++        haUp = false;
+     }
+ 
+     // ---- reports (from worker threads) ----
+@@ -144,12 +173,172 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         main.post(() -> {
+             cloudDownSince = up ? 0 : (cloudDownSince == 0 ? System.currentTimeMillis() : cloudDownSince);
+             if (up) cloudWarned = false;
+-            State s = copy();
+-            s.cloudConnected = up;
+-            publish(s);
++            tuyaUp = up;
++            publishLink();
++        });
++    }
++
++    // ---- Home Assistant (reports from HaWatch's thread) ----
++
++    @Override
++    public void haState(String id, boolean initial, boolean stateChanged, String value, JSONObject attributes) {
++        main.post(() -> onHaState(id, initial, stateChanged, value, attributes));
++    }
++
++    @Override
++    public void haEvent(String id, String type) {
++        main.post(() -> {
++            HaConfig c = ha;
++            if (c == null) return;
++            for (int i = 0; i < c.doorbells.size(); i++) {
++                HaConfig.Doorbell d = c.doorbells.get(i);
++                if (id.equals(d.ring)) onRing(i);
++                else if (id.equals(d.motion)) onMotion(i);
++            }
++        });
++    }
++
++    @Override
++    public void haLink(boolean up) {
++        main.post(() -> {
++            haDownSince = up ? 0 : (haDownSince == 0 ? System.currentTimeMillis() : haDownSince);
++            if (up) haWarned = false;
++            haUp = up;
++            publishLink();
++        });
++    }
++
++    @Override
++    public void haAuthFailed() {
++        main.post(() -> overlay.showSmall(Overlay.GREY, R.drawable.ic_info, getString(R.string.ha_token_refused),
++                getString(R.string.ha_token_refused_sub), 10000));
++    }
++
++    /** One Home Assistant entity, on the main thread: a role for the row and the messages, or a doorbell's motion. */
++    private void onHaState(String id, boolean initial, boolean stateChanged, String value, JSONObject attributes) {
++        HaConfig c = ha;
++        if (c == null) return;
++        haAttrs.put(id, attributes);
++        String role = c.roleOf(id);
++        if (role != null) {
++            Boolean on = Ha.onOff(value);
++            switch (role) {
++                case HaConfig.LUZ:
++                case HaConfig.CALEFACTOR:
++                    apply(role, Roles.Field.ON, on);
++                    break;
++                case HaConfig.TEMPERATURA:
++                    apply(role, Roles.Field.TEMPERATURE, Ha.tenths(value));
++                    break;
++                case HaConfig.HUMEDAD:
++                    apply(role, Roles.Field.HUMIDITY, Ha.whole(value));
++                    break;
++                case HaConfig.PUERTA:
++                    if (on != null) apply(Roles.PUERTA, Roles.Field.DOOR_OPEN, on);   // unavailable is not "closed"
++                    break;
++                case HaConfig.GAS:
++                    if (on != null) apply(Roles.GAS, Roles.Field.GAS, on ? "alarm" : "normal");
++                    break;
++                default:
++                    break;
++            }
++        }
++        if (!initial && stateChanged && "on".equals(value) && id.startsWith("binary_sensor.")) {
++            for (int i = 0; i < c.doorbells.size(); i++) if (id.equals(c.doorbells.get(i).motion)) onMotion(i);
++        }
++    }
++
++    private void onRing(int i) {
++        long now = System.currentTimeMillis();
++        lastRing[i] = now;
++        timbre.show(card(i, now, TimbreClient.RING));
++    }
++
++    private void onMotion(int i) {
++        HaConfig c = ha;
++        HaConfig.Doorbell d = c.doorbells.get(i);
++        boolean playing = getSystemService(AudioManager.class).isMusicActive();
++        switch (DoorbellRules.onMotion(c.motionMode, playing)) {
++            case CAPSULE:
++                overlay.showSmall(Overlay.AMBER, R.drawable.ic_motion, getString(R.string.motion_title, d.name),
++                        getString(R.string.motion_sub), 6000);
++                break;
++            case VIDEO:
++                if (!timbre.showing()) timbre.show(card(i, lastRing[i], TimbreClient.MOTION));
++                break;
++            default:
++                break;
++        }
++    }
++
++    /** "Look at the door" (TimbreActivity, from a key): the first doorbell with a camera. */
++    void lookAtDoor() {
++        main.post(() -> {
++            HaConfig c = ha;
++            if (c == null || c.doorbells.isEmpty()) {
++                Toast.makeText(this, R.string.no_doorbell, Toast.LENGTH_LONG).show();
++                return;
++            }
++            int i = 0;
++            while (i < c.doorbells.size() - 1 && c.doorbells.get(i).camera == null) i++;
++            timbre.show(card(i, lastRing[i], TimbreClient.VIEW));
+         });
+     }
+ 
++    /** What TimbreService needs for one doorbell's card; the openers are named as Home Assistant names them. */
++    private Bundle card(int i, long ringAt, String kind) {
++        HaConfig c = ha;
++        HaConfig.Doorbell d = c.doorbells.get(i);
++        Bundle b = new Bundle();
++        b.putString(TimbreService.NAME, d.name);
++        b.putString(TimbreService.CAMERA, d.camera);
++        b.putString(TimbreService.KIND, kind);
++        b.putLong(TimbreService.RING_AT, ringAt);
++        b.putInt(TimbreService.OPEN_WINDOW_S, c.openWindowS);
++        b.putBoolean(TimbreService.PAUSE, c.pause);
++        int n = d.open.size();
++        String[] ids = new String[n], labels = new String[n], services = new String[n];
++        for (int k = 0; k < n; k++) {
++            String e = d.open.get(k);
++            JSONObject a = haAttrs.get(e);
++            String name = a == null ? null : a.optString("friendly_name", null);
++            String[] svc = Ha.openService(e, Ha.lockCanOpen(a));
++            ids[k] = e;
++            services[k] = svc[0] + "/" + svc[1];
++            labels[k] = e.startsWith("lock.") ? getString(R.string.doorbell_open_lock, name != null ? name : d.name)
++                    : name != null ? name : getString(R.string.doorbell_open_gate);
++        }
++        b.putStringArray(TimbreService.OPEN_IDS, ids);
++        b.putStringArray(TimbreService.OPEN_LABELS, labels);
++        b.putStringArray(TimbreService.OPEN_SERVICES, services);
++        return b;
++    }
++
++    /** True when this role is Home Assistant's (the yellow key then switches it there). */
++    boolean haHas(String role) {
++        HaConfig c = ha;
++        return c != null && c.roles.containsKey(role);
++    }
++
++    /** Switches a role's entity through Home Assistant; false when it is not connected. Any thread. */
++    boolean haToggle(String role) {
++        HaConfig c = ha;
++        HaWatch w = haWatch;
++        String id = c == null ? null : c.roles.get(role);
++        String[] t = Ha.toggleService();
++        return id != null && w != null && w.call(t[0], t[1], id);
++    }
++
++    boolean haLinked() {
++        return haUp;
++    }
++
++    private void publishLink() {
++        State s = copy();
++        s.cloudConnected = tuyaUp || haUp;
++        publish(s);
++    }
++
+     @Override
+     public void gas(String status) {
+         main.post(() -> apply(Roles.GAS, Roles.Field.GAS, status));
+@@ -228,6 +417,10 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+             gasWarned = true;
+             overlay.showSmall(Overlay.GREY, R.drawable.ic_info, getString(R.string.gas_down), getString(R.string.gas_down_sub), 8000);
+         }
++        if (haWatch != null && haDownSince > 0 && now - haDownSince > WARN_AFTER_MS && !haWarned) {
++            haWarned = true;
++            overlay.showSmall(Overlay.GREY, R.drawable.ic_info, getString(R.string.ha_down), getString(R.string.ha_down_sub), 8000);
++        }
+     }
+ 
+     /** ADB-only tests of the messages (ImportActivity --es simulate ...). */
+@@ -243,6 +436,10 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+             show(new DoorAlerts.Alert(DoorAlerts.Kind.STILL_OPEN, 5));
+         } else if ("cerrada".equals(what)) {
+             show(new DoorAlerts.Alert(DoorAlerts.Kind.CLOSED, 7));
++        } else if ("timbre".equals(what) || "movimiento".equals(what)) {
++            if (ha == null || ha.doorbells.isEmpty()) Toast.makeText(this, R.string.no_doorbell, Toast.LENGTH_LONG).show();
++            else if ("timbre".equals(what)) onRing(0);
++            else onMotion(0);
+         }
+     }
+ 
+@@ -285,6 +482,7 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         stopWatchers();
+         main.removeCallbacksAndMessages(null);
+         overlay.dismissGas();
++        timbre.unbind();
+         unregisterReceiver(screenOn);
+         super.onDestroy();
+     }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ConfigProvider.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ConfigProvider.java
+new file mode 100644
+index 0000000..aa802e7
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ConfigProvider.java
+@@ -0,0 +1,73 @@
++package io.github.ignaciopd3.casa;
++
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.database.MatrixCursor;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.ParcelFileDescriptor;
++import android.widget.Toast;
++import java.io.File;
++import java.io.FileNotFoundException;
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++
++/**
++ * tv-opt's `run.py casa send` writes ha.json here with `content write`, so Home Assistant's token travels as a file,
++ * never on a command line; `content query` on /status says whether Casa took it and is connected. Only the ADB shell
++ * can do either (WRITE_SECURE_SETTINGS on the provider, as Smart Home and Frigate Glance do). The file is checked
++ * (HaConfig), kept in private preferences and deleted at once.
++ */
++public class ConfigProvider extends ContentProvider {
++    static final String FILE = "ha.json";
++    static final String[] STATUS = {"configured", "linked", "doorbells"};
++
++    @Override
++    public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
++        if (!mode.contains("w") || !FILE.equals(uri.getLastPathSegment())) throw new FileNotFoundException(uri.toString());
++        File f = new File(getContext().getFilesDir(), FILE);
++        try {
++            return ParcelFileDescriptor.open(f,
++                    ParcelFileDescriptor.MODE_WRITE_ONLY | ParcelFileDescriptor.MODE_CREATE | ParcelFileDescriptor.MODE_TRUNCATE,
++                    new Handler(Looper.getMainLooper()), e -> take(f));
++        } catch (IOException e) {
++            throw new FileNotFoundException(e.getMessage());
++        }
++    }
++
++    private void take(File f) {
++        boolean ok;
++        try {
++            Devices.saveHa(getContext(), new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
++            ok = true;
++        } catch (Exception e) {   // unreadable or refused by HaConfig: the previous configuration stays
++            ok = false;
++        } finally {
++            if (!f.delete()) f.deleteOnExit();
++        }
++        if (ok) {
++            CasaService s = CasaService.running();
++            if (s != null) s.reload();
++        }
++        Toast.makeText(getContext(), ok ? R.string.ha_saved : R.string.import_failed, Toast.LENGTH_LONG).show();
++    }
++
++    @Override
++    public Cursor query(Uri uri, String[] projection, String selection, String[] args, String order) {
++        if (!"status".equals(uri.getLastPathSegment())) return null;
++        HaConfig c = Devices.loadHa(getContext());
++        CasaService s = CasaService.running();
++        MatrixCursor out = new MatrixCursor(STATUS);
++        out.addRow(new Object[] {c != null ? 1 : 0, s != null && s.haLinked() ? 1 : 0, c == null ? 0 : c.doorbells.size()});
++        return out;
++    }
++
++    @Override public boolean onCreate() { return true; }
++    @Override public String getType(Uri uri) { return null; }
++    @Override public Uri insert(Uri uri, ContentValues values) { return null; }
++    @Override public int update(Uri uri, ContentValues v, String s, String[] a) { return 0; }
++    @Override public int delete(Uri uri, String s, String[] a) { return 0; }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+index 9889833..23fc606 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Devices.java
+@@ -13,7 +13,7 @@ import org.json.JSONObject;
+  * The devices Casa knows, by role, handed over once from the PC (ImportActivity) and kept in Casa's private
+  * preferences only: the plugs ("luz", "calefactor") and the gas sensor with what the home network needs (id, local
+  * key, address, protocol); the climate sensor and the door ("clima", "puerta") by id only, as they speak to the
+- * cloud alone. The TV's cloud session lives beside them.
++ * cloud alone. The TV's cloud session and Home Assistant's configuration live beside them.
+  */
+ final class Devices {
+     static final String LUZ = "luz", CALEFACTOR = "calefactor";
+@@ -21,7 +21,7 @@ final class Devices {
+     private static final Pattern ID = Pattern.compile("[A-Za-z0-9]{10,32}");
+     private static final Pattern KEY = Pattern.compile("[\\x21-\\x7e]{16}");
+     private static final Pattern IPV4 = Pattern.compile("((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)");
+-    private static final String PREFS = "devices", SESSION = "cloud_session";
++    private static final String PREFS = "devices", SESSION = "cloud_session", HA = "home_assistant";
+ 
+     static final class Device {
+         final String id, ip, version;
+@@ -106,6 +106,22 @@ final class Devices {
+         }
+     }
+ 
++    /** Home Assistant's configuration (ha.json from the PC), kept as checked text; replaces the previous one. */
++    static void saveHa(Context ctx, String json) throws JSONException {
++        HaConfig.parse(json);
++        prefs(ctx).edit().putString(HA, json).commit();   // commit: the :timbre process reads the file next
++    }
++
++    /** The stored Home Assistant configuration, or null when there is none (Casa then uses Smart Life only). */
++    static HaConfig loadHa(Context ctx) {
++        String s = prefs(ctx).getString(HA, null);
++        try {
++            return s == null ? null : HaConfig.parse(s);
++        } catch (JSONException e) {
++            return null;
++        }
++    }
++
+     private static SharedPreferences prefs(Context ctx) {
+         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+     }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+index 2b88f0d..c42c1b4 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ImportActivity.java
+@@ -9,8 +9,9 @@ import java.nio.charset.StandardCharsets;
+ 
+ /**
+  * Takes Casa's configuration from the PC (tools/casa_probe.py): {@code --es b64 <devices JSON>} and
+- * {@code --es session_b64 <cloud session JSON>}, both base64. {@code --es simulate gas|gas-normal|puerta|sigue|cerrada}
+- * shows a message without the real event, to test the screen. Guarded by DUMP in the manifest, so only the ADB shell
++ * {@code --es session_b64 <cloud session JSON>}, both base64. {@code --es simulate gas|gas-normal|puerta|sigue|cerrada|timbre|movimiento}
++ * shows a message (or the first doorbell's card) without the real event, to test the screen. Home Assistant's
++ * configuration comes through ConfigProvider instead, as a file. Guarded by DUMP in the manifest, so only the ADB shell
+  * and the system can open it.
+  */
+ public class ImportActivity extends Activity {
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreActivity.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreActivity.java
+new file mode 100644
+index 0000000..2581d9c
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreActivity.java
+@@ -0,0 +1,20 @@
++package io.github.ignaciopd3.casa;
++
++import android.app.Activity;
++import android.os.Bundle;
++import android.widget.Toast;
++
++/**
++ * "Look at the door" from a remote key (the launcher's app_keys): the first doorbell with a camera, live, with open
++ * buttons only if someone rang in the last few minutes. Signature permission, like the light's.
++ */
++public class TimbreActivity extends Activity {
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        CasaService s = CasaService.running();
++        if (s != null) s.lookAtDoor();
++        else Toast.makeText(this, R.string.not_running, Toast.LENGTH_LONG).show();
++        finish();
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
+new file mode 100644
+index 0000000..3e1e00c
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
+@@ -0,0 +1,409 @@
++package io.github.ignaciopd3.casa;
++
++import android.annotation.SuppressLint;
++import android.content.Context;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.Path;
++import android.graphics.PathMeasure;
++import android.graphics.PixelFormat;
++import android.graphics.RectF;
++import android.graphics.Typeface;
++import android.graphics.drawable.GradientDrawable;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import android.provider.Settings;
++import android.text.format.DateFormat;
++import android.util.DisplayMetrics;
++import android.view.Gravity;
++import android.view.KeyEvent;
++import android.view.View;
++import android.view.WindowManager;
++import android.widget.FrameLayout;
++import android.widget.ImageView;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++import java.util.ArrayList;
++import java.util.Date;
++import java.util.List;
++import org.webrtc.SurfaceViewRenderer;
++
++/**
++ * The doorbell card on screen, in the shape the owner picks from the mockup (https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV):
++ * this is option 1, "Esquina", a third of the screen at the bottom right, and the only class that knows the shape.
++ * Dark glass like Casa's other messages: a header with the doorbell's name and the time, the live video, one button per
++ * opener plus Close, and a hint. It takes the remote while it shows (◀ ▶ move, OK held 1.5 s opens, Back closes), except
++ * for motion with video, which never takes it.
++ */
++final class TimbreCard {
++    interface Listener {
++        void onKey();
++
++        void onOpen(int which);
++
++        void onClose();
++    }
++
++    private static final int GREEN = 0xFF30D158, RED = 0xFFFF453A, INK = 0xFFEEF1F6, GLASS = 0xD1080A10;
++    private static final float WIDTH = 0.38f, MARGIN_X = 0.026f, MARGIN_Y = 0.04f;
++
++    private final Context ctx;
++    private final WindowManager wm;
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final Bundle card;
++    private final boolean takesRemote;
++    private final Listener listener;
++    private final float dp;
++    private final List<HoldButton> buttons = new ArrayList<>();
++    private LinearLayout root;
++    private TextView title, sub, status, hint, badge;
++    private SurfaceViewRenderer renderer;
++    private int focus;
++    private Boolean shownCanOpen;   // what the buttons show now; null before the first setCanOpen
++    private long holdStart = -1;
++    private final Runnable holdTick = new Runnable() {
++        @Override
++        public void run() {
++            if (holdStart < 0) return;
++            long held = SystemClock.uptimeMillis() - holdStart;
++            HoldButton b = buttons.get(focus);
++            b.setProgress(DoorbellRules.holdProgress(held));
++            if (DoorbellRules.holdOpens(held)) {
++                holdStart = -1;
++                b.setProgress(0);
++                b.setText(ctx.getString(R.string.doorbell_opening));
++                listener.onOpen(focus);
++            } else {
++                main.postDelayed(this, 16);
++            }
++        }
++    };
++
++    TimbreCard(Context ctx, Bundle card, boolean takesRemote, Listener listener) {
++        this.ctx = ctx;
++        this.wm = ctx.getSystemService(WindowManager.class);
++        this.card = card;
++        this.takesRemote = takesRemote;
++        this.listener = listener;
++        this.dp = ctx.getResources().getDisplayMetrics().density;
++    }
++
++    @SuppressLint("ClickableViewAccessibility")
++    void show(long now) {
++        if (!Settings.canDrawOverlays(ctx)) {
++            Toast.makeText(ctx, title(now), Toast.LENGTH_LONG).show();
++            return;
++        }
++        DisplayMetrics m = ctx.getResources().getDisplayMetrics();
++        int width = Math.round(m.widthPixels * WIDTH);
++        root = new LinearLayout(ctx);
++        root.setOrientation(LinearLayout.VERTICAL);
++        GradientDrawable bg = new GradientDrawable();
++        bg.setColor(GLASS);
++        bg.setCornerRadius(px(22));
++        bg.setStroke(Math.max(1, px(1)), 0x1FFFFFFF);
++        root.setBackground(bg);
++        int pad = px(14);
++        root.setPadding(pad, pad, pad, pad);
++
++        root.addView(header(now));
++        int videoW = width - 2 * pad;
++        FrameLayout videoBox = new FrameLayout(ctx);
++        videoBox.setBackgroundColor(0xFF1B222B);
++        renderer = new SurfaceViewRenderer(ctx);
++        renderer.setZOrderMediaOverlay(true);
++        videoBox.addView(renderer, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
++        status = text(ctx.getString(R.string.doorbell_connecting), 13, 0xBFFFFFFF, false);
++        videoBox.addView(status, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
++        badge = text(ctx.getString(R.string.doorbell_live), 11, Color.WHITE, true);
++        GradientDrawable red = new GradientDrawable();
++        red.setColor(RED);
++        red.setCornerRadius(px(5));
++        badge.setBackground(red);
++        badge.setPadding(px(7), px(2), px(7), px(2));
++        badge.setVisibility(View.GONE);
++        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
++        blp.setMargins(px(8), px(8), 0, 0);
++        videoBox.addView(badge, blp);
++        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(videoW, videoW * 9 / 16);
++        vlp.topMargin = px(10);
++        root.addView(videoBox, vlp);
++
++        LinearLayout row = new LinearLayout(ctx);
++        row.setOrientation(LinearLayout.HORIZONTAL);
++        String[] labels = card.getStringArray(TimbreService.OPEN_LABELS);
++        String[] ids = card.getStringArray(TimbreService.OPEN_IDS);
++        for (int i = 0; labels != null && i < labels.length; i++) {
++            buttons.add(button(labels[i], ids[i].startsWith("lock.") ? R.drawable.ic_key : R.drawable.ic_portal, row));
++        }
++        buttons.add(button(ctx.getString(R.string.doorbell_close), R.drawable.ic_close, row));
++        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
++        rlp.topMargin = px(10);
++        root.addView(row, rlp);
++        hint = text("", 12, 0xFF98A1B0, false);
++        hint.setGravity(Gravity.CENTER_HORIZONTAL);
++        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
++        hlp.topMargin = px(8);
++        root.addView(hint, hlp);
++
++        int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
++        if (!takesRemote) flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
++        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(width, WindowManager.LayoutParams.WRAP_CONTENT,
++                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT);
++        lp.gravity = Gravity.BOTTOM | Gravity.END;
++        lp.x = Math.round(m.widthPixels * MARGIN_X);
++        lp.y = Math.round(m.heightPixels * MARGIN_Y);
++        if (takesRemote) {
++            root.setFocusable(true);
++            root.setFocusableInTouchMode(true);
++            root.setOnKeyListener((v, code, ev) -> key(code, ev));
++        }
++        wm.addView(root, lp);
++        if (takesRemote) root.requestFocus();
++        paintFocus();
++    }
++
++    SurfaceViewRenderer renderer() {
++        return renderer;
++    }
++
++    /** Rung again while showing: the new time, and the open buttons are back if they had gone. */
++    void ringing(long now) {
++        if (title != null) title.setText(title(now));
++        if (sub != null) sub.setText(clock(now));
++    }
++
++    void live() {
++        if (status != null) status.setVisibility(View.GONE);
++        if (badge != null) badge.setVisibility(View.VISIBLE);
++    }
++
++    void noVideo() {
++        if (status != null) status.setText(card.getString(TimbreService.CAMERA) == null
++                ? ctx.getString(R.string.doorbell_no_camera) : ctx.getString(R.string.doorbell_no_video));
++        if (badge != null) badge.setVisibility(View.GONE);
++    }
++
++    /** Open buttons only while a real ring is recent; without them the remote can only close. */
++    void setCanOpen(boolean can) {
++        if (root == null || Boolean.valueOf(can).equals(shownCanOpen)) return;
++        shownCanOpen = can;
++        for (int i = 0; i < buttons.size() - 1; i++) buttons.get(i).setVisibility(can ? View.VISIBLE : View.GONE);
++        if (!can) focus = buttons.size() - 1;
++        hint.setText(buttons.size() == 1 ? ctx.getString(R.string.doorbell_hint_close)
++                : can ? ctx.getString(R.string.doorbell_hint_open) : ctx.getString(R.string.doorbell_hint_no_ring));
++        paintFocus();
++    }
++
++    /** Home Assistant's answer to an opening: the button says so for a few seconds. */
++    void opened(int which, boolean ok) {
++        if (which >= buttons.size() - 1) return;
++        HoldButton b = buttons.get(which);
++        b.setText(ctx.getString(ok ? R.string.doorbell_opened : R.string.doorbell_open_failed));
++        b.result = ok ? GREEN : RED;
++        paintFocus();
++        main.postDelayed(() -> {
++            b.result = 0;
++            b.setText(b.label);
++            paintFocus();
++        }, 4000);
++    }
++
++    void remove() {
++        main.removeCallbacksAndMessages(null);
++        if (root != null) {
++            wm.removeView(root);
++            root = null;
++        }
++    }
++
++    // ---- keys ----
++
++    private boolean key(int code, KeyEvent ev) {
++        boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
++        switch (code) {
++            case KeyEvent.KEYCODE_DPAD_LEFT:
++            case KeyEvent.KEYCODE_DPAD_RIGHT:
++                if (down) {
++                    cancelHold();
++                    move(code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1);
++                    listener.onKey();
++                }
++                return true;
++            case KeyEvent.KEYCODE_DPAD_CENTER:
++            case KeyEvent.KEYCODE_ENTER:
++            case KeyEvent.KEYCODE_NUMPAD_ENTER:
++                if (down && ev.getRepeatCount() == 0) {
++                    listener.onKey();
++                    if (focus == buttons.size() - 1) {
++                        listener.onClose();
++                    } else {
++                        holdStart = SystemClock.uptimeMillis();
++                        main.post(holdTick);
++                    }
++                } else if (!down) {
++                    cancelHold();
++                }
++                return true;
++            case KeyEvent.KEYCODE_BACK:
++                if (!down) listener.onClose();
++                return true;
++            case KeyEvent.KEYCODE_DPAD_UP:
++            case KeyEvent.KEYCODE_DPAD_DOWN:
++                return true;   // nothing above or below; keep them from the app underneath
++            default:
++                return false;
++        }
++    }
++
++    private void cancelHold() {
++        if (holdStart < 0) return;
++        holdStart = -1;
++        main.removeCallbacks(holdTick);
++        buttons.get(focus).setProgress(0);
++    }
++
++    private void move(int step) {
++        int n = buttons.size();
++        for (int i = 1; i <= n; i++) {
++            int next = ((focus + step * i) % n + n) % n;
++            if (buttons.get(next).getVisibility() == View.VISIBLE) {
++                focus = next;
++                break;
++            }
++        }
++        paintFocus();
++    }
++
++    private void paintFocus() {
++        for (int i = 0; i < buttons.size(); i++) buttons.get(i).paint(i == focus && takesRemote);
++    }
++
++    // ---- building ----
++
++    private LinearLayout header(long now) {
++        LinearLayout h = new LinearLayout(ctx);
++        h.setOrientation(LinearLayout.HORIZONTAL);
++        h.setGravity(Gravity.CENTER_VERTICAL);
++        FrameLayout disc = new FrameLayout(ctx);
++        GradientDrawable circle = new GradientDrawable();
++        circle.setShape(GradientDrawable.OVAL);
++        circle.setColor(GREEN);
++        disc.setBackground(circle);
++        ImageView bell = new ImageView(ctx);
++        bell.setImageResource(R.drawable.ic_bell);
++        bell.setColorFilter(0xFF06210F);
++        int d = px(30);
++        disc.addView(bell, new FrameLayout.LayoutParams(d * 6 / 10, d * 6 / 10, Gravity.CENTER));
++        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(d, d);
++        dlp.setMarginEnd(px(10));
++        h.addView(disc, dlp);
++        LinearLayout texts = new LinearLayout(ctx);
++        texts.setOrientation(LinearLayout.VERTICAL);
++        title = text(title(now), 17, Color.WHITE, true);
++        sub = text(clock(now), 12, 0xFF98A1B0, false);
++        texts.addView(title);
++        texts.addView(sub);
++        h.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
++        return h;
++    }
++
++    private String title(long now) {
++        String name = card.getString(TimbreService.NAME, "");
++        String kind = card.getString(TimbreService.KIND, TimbreClient.VIEW);
++        if (TimbreClient.RING.equals(kind)) return ctx.getString(R.string.doorbell_ringing, name);
++        if (TimbreClient.MOTION.equals(kind)) return ctx.getString(R.string.motion_title, name);
++        return name;
++    }
++
++    private String clock(long now) {
++        return DateFormat.getTimeFormat(ctx).format(new Date(now));
++    }
++
++    private HoldButton button(String label, int icon, LinearLayout row) {
++        HoldButton b = new HoldButton(ctx, label, icon == 0 ? null : ctx.getDrawable(icon));
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, px(40), 1);
++        if (row.getChildCount() > 0) lp.setMarginStart(px(8));
++        row.addView(b, lp);
++        return b;
++    }
++
++    private TextView text(String s, float sp, int color, boolean medium) {
++        TextView t = new TextView(ctx);
++        t.setText(s);
++        t.setTextSize(sp);
++        t.setTextColor(color);
++        t.setSingleLine(true);
++        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
++        t.setTypeface(Typeface.create(medium ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
++        return t;
++    }
++
++    private int px(float dps) {
++        return Math.round(dps * dp);
++    }
++
++    /** A pill button whose outline fills up in green while OK is held, as in the mockup. */
++    private final class HoldButton extends TextView {
++        final String label;
++        int result;   // 0, or the colour of the last opening's answer
++        private float progress;
++        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
++        private final Path path = new Path(), seg = new Path();
++        private final RectF box = new RectF();
++
++        HoldButton(Context c, String label, android.graphics.drawable.Drawable icon) {
++            super(c);
++            this.label = label;
++            setText(label);
++            setTextSize(14);
++            setGravity(Gravity.CENTER);
++            setSingleLine(true);
++            setEllipsize(android.text.TextUtils.TruncateAt.END);
++            setPadding(px(10), 0, px(10), 0);
++            if (icon != null) {
++                icon.setBounds(0, 0, px(16), px(16));
++                setCompoundDrawablesRelative(icon, null, null, null);
++                setCompoundDrawablePadding(px(6));
++            }
++            ring.setStyle(Paint.Style.STROKE);
++            ring.setStrokeWidth(px(3));
++            ring.setColor(GREEN);
++            ring.setStrokeCap(Paint.Cap.ROUND);
++        }
++
++        void setProgress(float p) {
++            progress = p;
++            invalidate();
++        }
++
++        void paint(boolean focused) {
++            GradientDrawable bg = new GradientDrawable();
++            bg.setCornerRadius(px(20));
++            int fill = result != 0 ? result : focused ? INK : 0x14FFFFFF;
++            int ink = result == GREEN ? 0xFF06210F : focused && result == 0 ? 0xFF0B0D12 : Color.WHITE;
++            bg.setColor(fill);
++            setBackground(bg);
++            setTextColor(ink);
++            for (android.graphics.drawable.Drawable d : getCompoundDrawablesRelative()) if (d != null) d.setTint(ink);
++        }
++
++        @Override
++        protected void onDraw(Canvas canvas) {
++            super.onDraw(canvas);
++            if (progress <= 0) return;
++            float w = ring.getStrokeWidth() / 2;
++            box.set(w, w, getWidth() - w, getHeight() - w);
++            path.reset();
++            path.addRoundRect(box, box.height() / 2, box.height() / 2, Path.Direction.CW);
++            PathMeasure pm = new PathMeasure(path, false);
++            seg.reset();
++            pm.getSegment(0, pm.getLength() * progress, seg, true);
++            canvas.drawPath(seg, ring);
++        }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreClient.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreClient.java
+new file mode 100644
+index 0000000..b4f43ad
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreClient.java
+@@ -0,0 +1,92 @@
++package io.github.ignaciopd3.casa;
++
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.ServiceConnection;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.IBinder;
++import android.os.Looper;
++import android.os.Message;
++import android.os.Messenger;
++import android.os.RemoteException;
++
++/**
++ * Casa's side of the doorbell card: binds TimbreService (its own :timbre process, where libwebrtc lives) only while a
++ * card shows, and lets go when the card says it closed, so the process ends and Casa stays small. Binding is allowed
++ * from the background, where starting a service is not (Android 8+, and TCL's firmware). Main thread only.
++ */
++final class TimbreClient implements ServiceConnection {
++    static final String RING = "ring", MOTION = "motion", VIEW = "view";
++    static final int MSG_SHOW = 1, MSG_CLOSED = 2;
++
++    private final Context ctx;
++    private final Messenger replies = new Messenger(new Handler(Looper.getMainLooper(), m -> {
++        if (m.what == MSG_CLOSED) unbind();
++        return true;
++    }));
++    private Messenger service;
++    private Bundle pending;
++    private boolean bound;
++
++    TimbreClient(Context ctx) {
++        this.ctx = ctx;
++    }
++
++    /** Shows a card (TimbreService's keys), or updates the one showing: a new ring, or another doorbell. */
++    void show(Bundle card) {
++        if (service != null) {
++            send(card);
++            return;
++        }
++        pending = card;
++        if (!bound) {
++            bound = ctx.bindService(new Intent(ctx, TimbreService.class), this, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
++            if (!bound) pending = null;
++        }
++    }
++
++    boolean showing() {
++        return bound;
++    }
++
++    @Override
++    public void onServiceConnected(ComponentName name, IBinder binder) {
++        service = new Messenger(binder);
++        if (pending != null) {
++            send(pending);
++            pending = null;
++        }
++    }
++
++    /** The :timbre process died (or was killed): let go rather than have Android start it again. */
++    @Override
++    public void onServiceDisconnected(ComponentName name) {
++        unbind();
++    }
++
++    private void send(Bundle card) {
++        Message m = Message.obtain(null, MSG_SHOW);
++        m.setData(card);
++        m.replyTo = replies;
++        try {
++            service.send(m);
++        } catch (RemoteException e) {
++            unbind();
++        }
++    }
++
++    void unbind() {
++        if (bound) {
++            try {
++                ctx.unbindService(this);
++            } catch (IllegalArgumentException ignored) {
++                // already let go
++            }
++        }
++        bound = false;
++        service = null;
++        pending = null;
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
+new file mode 100644
+index 0000000..cdbd97f
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
+@@ -0,0 +1,231 @@
++package io.github.ignaciopd3.casa;
++
++import android.app.Service;
++import android.content.Intent;
++import android.media.AudioManager;
++import android.media.ToneGenerator;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.IBinder;
++import android.os.Looper;
++import android.os.Message;
++import android.os.Messenger;
++import android.os.Process;
++import android.os.RemoteException;
++import android.os.SystemClock;
++import android.view.KeyEvent;
++import java.util.List;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * The doorbell card, in its own process (:timbre) so libwebrtc's memory goes away with it: the window (TimbreCard),
++ * the camera's live video over Home Assistant (TimbreVideo, HaWebRtc), the opening calls, the pause of whatever was
++ * playing and the close after 90 s (DoorbellRules). Casa binds it while a card shows; when the card closes it tells
++ * Casa, Casa lets go, and onDestroy ends the process.
++ */
++public class TimbreService extends Service implements TimbreCard.Listener, TimbreVideo.Listener {
++    static final String NAME = "name", CAMERA = "camera", KIND = "kind", RING_AT = "ring_at", OPEN_WINDOW_S = "open_window_s",
++            PAUSE = "pause", OPEN_IDS = "open_ids", OPEN_LABELS = "open_labels", OPEN_SERVICES = "open_services";
++
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final ExecutorService worker = Executors.newSingleThreadExecutor();
++    private Messenger client;
++    private TimbreCard card;
++    private DoorbellRules rules;
++    private Bundle current;
++    private HaWebRtc rtc;   // worker thread only
++    private TimbreVideo video;
++    private boolean pausedByUs, motionOnly;
++    private long motionUntil;
++    private final Runnable tick = new Runnable() {
++        @Override
++        public void run() {
++            if (card == null) return;
++            long now = System.currentTimeMillis();
++            if (rules.shouldClose(now) || (motionOnly && now >= motionUntil)) {
++                onClose();
++                return;
++            }
++            card.setCanOpen(rules.canOpen(now));
++            main.postDelayed(this, 1000);
++        }
++    };
++
++    @Override
++    public IBinder onBind(Intent intent) {
++        return new Messenger(new Handler(Looper.getMainLooper(), this::onMessage)).getBinder();
++    }
++
++    private boolean onMessage(Message m) {
++        if (m.what == TimbreClient.MSG_SHOW) {
++            client = m.replyTo;
++            show(m.getData());
++        }
++        return true;
++    }
++
++    private void show(Bundle b) {
++        long now = System.currentTimeMillis();
++        String kind = b.getString(KIND, TimbreClient.VIEW);
++        boolean sameDoor = card != null && current != null && b.getString(NAME, "").equals(current.getString(NAME));
++        if (sameDoor && TimbreClient.RING.equals(kind)) {   // rung again while looking
++            rules.onRing(now);
++            motionOnly = false;
++            card.ringing(now);
++            chime();
++            return;
++        }
++        if (sameDoor) return;
++        teardown();
++        current = b;
++        motionOnly = TimbreClient.MOTION.equals(kind);
++        motionUntil = now + DoorbellRules.MOTION_VIDEO_MS;
++        rules = new DoorbellRules(b.getInt(OPEN_WINDOW_S, 180), b.getLong(RING_AT, -1), now);
++        card = new TimbreCard(this, b, !motionOnly, this);
++        card.show(now);
++        card.setCanOpen(rules.canOpen(now));
++        if (TimbreClient.RING.equals(kind)) chime();
++        AudioManager am = getSystemService(AudioManager.class);
++        if (!motionOnly && DoorbellRules.shouldPause(b.getBoolean(PAUSE, true), am.isMusicActive())) {
++            mediaKey(am, KeyEvent.KEYCODE_MEDIA_PAUSE);
++            pausedByUs = true;
++        }
++        String camera = b.getString(CAMERA);
++        if (camera != null) startVideo(camera);
++        else card.noVideo();
++        main.postDelayed(tick, 1000);
++    }
++
++    private void startVideo(String camera) {
++        TimbreCard forCard = card;
++        worker.execute(() -> {
++            try {
++                HaWebRtc r = connection();
++                List<Ha.Ice> ice = r.iceServers(camera);
++                main.post(() -> {
++                    if (card != forCard) return;   // closed or switched meanwhile
++                    try {
++                        video = new TimbreVideo(this, card.renderer(), ice, r, camera, this);
++                    } catch (RuntimeException e) {   // libwebrtc could not start on this TV
++                        card.noVideo();
++                    }
++                });
++            } catch (Exception e) {
++                main.post(() -> {
++                    if (card == forCard) card.noVideo();
++                });
++            }
++        });
++    }
++
++    /** The card's own line to Home Assistant, opened once on the worker thread. */
++    private HaWebRtc connection() throws Exception {
++        if (rtc == null) {
++            HaConfig c = Devices.loadHa(this);
++            if (c == null) throw new IllegalStateException("no Home Assistant configuration");
++            rtc = HaWebRtc.open(() -> WebSocket.connect(c.ws, 10_000), c.token);
++        }
++        return rtc;
++    }
++
++    // ---- TimbreCard.Listener ----
++
++    @Override
++    public void onKey() {
++        if (rules != null) rules.onKey(System.currentTimeMillis());
++    }
++
++    @Override
++    public void onOpen(int which) {
++        if (card == null || !rules.canOpen(System.currentTimeMillis())) return;   // the window may have just passed
++        String id = current.getStringArray(OPEN_IDS)[which];
++        String[] service = current.getStringArray(OPEN_SERVICES)[which].split("/", 2);
++        TimbreCard forCard = card;
++        worker.execute(() -> {
++            try {
++                connection().call(service[0], service[1], id, ok -> main.post(() -> {
++                    if (card == forCard) card.opened(which, ok);
++                }));
++            } catch (Exception e) {
++                main.post(() -> {
++                    if (card == forCard) card.opened(which, false);
++                });
++            }
++        });
++    }
++
++    @Override
++    public void onClose() {
++        teardown();
++        if (pausedByUs) {
++            mediaKey(getSystemService(AudioManager.class), KeyEvent.KEYCODE_MEDIA_PLAY);
++            pausedByUs = false;
++        }
++        if (client != null) {
++            try {
++                client.send(Message.obtain(null, TimbreClient.MSG_CLOSED));
++            } catch (RemoteException ignored) {
++                // Casa is gone; the process ends with the binding anyway
++            }
++        }
++    }
++
++    // ---- TimbreVideo.Listener ----
++
++    @Override
++    public void live() {
++        if (card != null) card.live();
++    }
++
++    @Override
++    public void videoFailed() {
++        if (card != null) card.noVideo();
++    }
++
++    // ---- helpers ----
++
++    private void teardown() {
++        main.removeCallbacks(tick);
++        if (video != null) {
++            video.dispose();
++            video = null;
++        }
++        if (card != null) {
++            card.remove();
++            card = null;
++        }
++        current = null;
++        worker.execute(() -> {
++            if (rtc != null) {
++                rtc.close();
++                rtc = null;
++            }
++        });
++    }
++
++    private void chime() {
++        try {
++            ToneGenerator t = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
++            t.startTone(ToneGenerator.TONE_PROP_BEEP2, 700);
++            main.postDelayed(t::release, 1000);
++        } catch (RuntimeException noAudio) {
++            // no tone on this set: the card still shows
++        }
++    }
++
++    /** Pause or play whatever is playing, through its media session; needs no permission. */
++    private static void mediaKey(AudioManager am, int code) {
++        long t = SystemClock.uptimeMillis();
++        am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0));
++        am.dispatchMediaKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_UP, code, 0));
++    }
++
++    @Override
++    public void onDestroy() {
++        teardown();
++        worker.shutdown();
++        super.onDestroy();
++        Process.killProcess(Process.myPid());   // libwebrtc's native memory leaves with the process
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreVideo.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreVideo.java
+new file mode 100644
+index 0000000..7c5f1d7
+--- /dev/null
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreVideo.java
+@@ -0,0 +1,184 @@
++package io.github.ignaciopd3.casa;
++
++import android.content.Context;
++import android.media.AudioAttributes;
++import android.os.Handler;
++import android.os.Looper;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++import org.webrtc.DataChannel;
++import org.webrtc.DefaultVideoDecoderFactory;
++import org.webrtc.DefaultVideoEncoderFactory;
++import org.webrtc.EglBase;
++import org.webrtc.IceCandidate;
++import org.webrtc.MediaConstraints;
++import org.webrtc.MediaStream;
++import org.webrtc.MediaStreamTrack;
++import org.webrtc.PeerConnection;
++import org.webrtc.PeerConnectionFactory;
++import org.webrtc.RendererCommon;
++import org.webrtc.RtpReceiver;
++import org.webrtc.RtpTransceiver;
++import org.webrtc.SdpObserver;
++import org.webrtc.SessionDescription;
++import org.webrtc.SurfaceViewRenderer;
++import org.webrtc.VideoTrack;
++import org.webrtc.audio.AudioDeviceModule;
++import org.webrtc.audio.JavaAudioDeviceModule;
++
++/**
++ * The camera's live picture and sound through libwebrtc, receive-only, as Home Assistant's own web page gets it: one
++ * peer connection whose offer and candidates go through HaWebRtc. Video is decoded by the TV's hardware decoder
++ * (DefaultVideoDecoderFactory with EGL). Main thread for construction and dispose; libwebrtc calls back on its own
++ * threads, which only post to the main thread.
++ */
++final class TimbreVideo implements HaWebRtc.Peer {
++    interface Listener {
++        void live();
++
++        void videoFailed();
++    }
++
++    private final Handler main = new Handler(Looper.getMainLooper());
++    private final EglBase egl = EglBase.create();
++    private final SurfaceViewRenderer renderer;
++    private final Listener listener;
++    private final PeerConnectionFactory factory;
++    private final PeerConnection pc;
++    private volatile boolean disposed;
++
++    TimbreVideo(Context ctx, SurfaceViewRenderer renderer, List<Ha.Ice> ice, HaWebRtc rtc, String camera, Listener listener) {
++        this.renderer = renderer;
++        this.listener = listener;
++        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx.getApplicationContext())
++                .createInitializationOptions());
++        renderer.init(egl.getEglBaseContext(), null);
++        renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT);
++        renderer.setEnableHardwareScaler(true);
++        // Media, not a call: on a TV the call volume can be low or muted, and the visitor must be heard.
++        AudioDeviceModule adm = JavaAudioDeviceModule.builder(ctx.getApplicationContext())
++                .setAudioAttributes(new AudioAttributes.Builder()
++                        .setUsage(AudioAttributes.USAGE_MEDIA)
++                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
++                        .build())
++                .createAudioDeviceModule();
++        factory = PeerConnectionFactory.builder()
++                .setAudioDeviceModule(adm)
++                .setVideoDecoderFactory(new DefaultVideoDecoderFactory(egl.getEglBaseContext()))
++                .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, true))
++                .createPeerConnectionFactory();
++        adm.release();   // the factory keeps its own reference
++
++        List<PeerConnection.IceServer> servers = new ArrayList<>();
++        for (Ha.Ice s : ice) {
++            PeerConnection.IceServer.Builder b = PeerConnection.IceServer.builder(s.urls);
++            if (s.username != null) b.setUsername(s.username);
++            if (s.credential != null) b.setPassword(s.credential);
++            servers.add(b.createIceServer());
++        }
++        PeerConnection.RTCConfiguration conf = new PeerConnection.RTCConfiguration(servers);
++        conf.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
++        pc = factory.createPeerConnection(conf, new Watcher(rtc));
++        if (pc == null) throw new IllegalStateException("no peer connection");
++        RtpTransceiver.RtpTransceiverInit recvOnly = new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY);
++        pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, recvOnly);
++        pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnly);
++        pc.createOffer(new Sdp() {
++            @Override
++            public void onCreateSuccess(SessionDescription offer) {
++                pc.setLocalDescription(new Sdp() {
++                    @Override
++                    public void onSetSuccess() {
++                        try {
++                            rtc.offer(camera, offer.description, TimbreVideo.this);
++                        } catch (IOException e) {
++                            failed(e.getMessage());
++                        }
++                    }
++                }, offer);
++            }
++        }, new MediaConstraints());
++    }
++
++    // ---- HaWebRtc.Peer (reader thread) ----
++
++    @Override
++    public void answer(String sdp) {
++        if (!disposed) pc.setRemoteDescription(new Sdp(), new SessionDescription(SessionDescription.Type.ANSWER, sdp));
++    }
++
++    @Override
++    public void remoteCandidate(String sdpMid, int sdpMLineIndex, String candidate) {
++        if (!disposed) pc.addIceCandidate(new IceCandidate(sdpMid, sdpMLineIndex, candidate));
++    }
++
++    @Override
++    public void failed(String why) {
++        main.post(() -> {
++            if (!disposed) listener.videoFailed();
++        });
++    }
++
++    void dispose() {
++        if (disposed) return;
++        disposed = true;
++        pc.dispose();
++        renderer.release();
++        factory.dispose();
++        egl.release();
++    }
++
++    /** SdpObserver with nothing to do by default; a failure ends the video. */
++    private class Sdp implements SdpObserver {
++        @Override public void onCreateSuccess(SessionDescription d) { }
++        @Override public void onSetSuccess() { }
++        @Override public void onCreateFailure(String error) { failed(error); }
++        @Override public void onSetFailure(String error) { failed(error); }
++    }
++
++    private final class Watcher implements PeerConnection.Observer {
++        private final HaWebRtc rtc;
++
++        Watcher(HaWebRtc rtc) {
++            this.rtc = rtc;
++        }
++
++        @Override
++        public void onIceCandidate(IceCandidate c) {
++            rtc.localCandidate(c.sdp, c.sdpMid, c.sdpMLineIndex);
++        }
++
++        @Override
++        public void onTrack(RtpTransceiver transceiver) {
++            MediaStreamTrack track = transceiver.getReceiver().track();
++            if (track instanceof VideoTrack) {
++                main.post(() -> {
++                    if (!disposed) ((VideoTrack) track).addSink(renderer);
++                });
++            }
++        }
++
++        @Override
++        public void onConnectionChange(PeerConnection.PeerConnectionState state) {
++            if (state == PeerConnection.PeerConnectionState.CONNECTED) {
++                main.post(() -> {
++                    if (!disposed) listener.live();
++                });
++            } else if (state == PeerConnection.PeerConnectionState.FAILED) {
++                failed("connection failed");
++            }
++        }
++
++        @Override public void onSignalingChange(PeerConnection.SignalingState s) { }
++        @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) { }
++        @Override public void onIceConnectionReceivingChange(boolean receiving) { }
++        @Override public void onIceGatheringChange(PeerConnection.IceGatheringState s) { }
++        @Override public void onIceCandidatesRemoved(IceCandidate[] candidates) { }
++        @Override public void onAddStream(MediaStream stream) { }
++        @Override public void onRemoveStream(MediaStream stream) { }
++        @Override public void onDataChannel(DataChannel channel) { }
++        @Override public void onRenegotiationNeeded() { }
++        @Override public void onAddTrack(RtpReceiver receiver, MediaStream[] streams) { }
++    }
++}
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+index 464fe24..5279351 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/ToggleService.java
+@@ -32,8 +32,10 @@ public class ToggleService extends Service {
+         return START_NOT_STICKY;
+     }
+ 
+-    /** 0 when the plug switched, otherwise the message to show. */
++    /** 0 when the plug switched, otherwise the message to show. A role set up in Home Assistant switches there. */
+     private int toggle(String role) {
++        CasaService casa = CasaService.running();
++        if (role != null && casa != null && casa.haHas(role)) return casa.haToggle(role) ? 0 : R.string.ha_failed;
+         Devices.Device d = role == null ? null : Devices.load(this, role);
+         if (d == null) return R.string.not_configured;
+         try (TuyaLocal t = TuyaLocal.connect(d)) {
+diff --git a/addons/casa/app/src/main/res/drawable/ic_bell.xml b/addons/casa/app/src/main/res/drawable/ic_bell.xml
+new file mode 100644
+index 0000000..e7287ba
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_bell.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A doorbell's bell. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M6,10a6,6 0,0 1,12 0v4l2,3H4l2,-3zM10,20a2,2 0,0 0,4 0" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_close.xml b/addons/casa/app/src/main/res/drawable/ic_close.xml
+new file mode 100644
+index 0000000..fa450aa
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_close.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A cross. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M6,6l12,12M18,6L6,18" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_key.xml b/addons/casa/app/src/main/res/drawable/ic_key.xml
+new file mode 100644
+index 0000000..d0aa550
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_key.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A key. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M8,11a4,4 0,1 1,0 8a4,4 0,1 1,0 -8M11,12l9,-9M17,6l2,2M15,8l2,2" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_motion.xml b/addons/casa/app/src/main/res/drawable/ic_motion.xml
+new file mode 100644
+index 0000000..d649775
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_motion.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Someone walking. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M12,3.6a2.4,2.4 0,1 1,0 4.8a2.4,2.4 0,1 1,0 -4.8M12,9v6l-3,5M12,15l3,5M8,12h8" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/drawable/ic_portal.xml b/addons/casa/app/src/main/res/drawable/ic_portal.xml
+new file mode 100644
+index 0000000..0de82d4
+--- /dev/null
++++ b/addons/casa/app/src/main/res/drawable/ic_portal.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- A building's entrance. Own art, thin line like the launcher's top bar. -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
++    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
++        android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M4,21V5l8,-3 8,3v16M9,21v-6h6v6" />
++</vector>
+diff --git a/addons/casa/app/src/main/res/values-es/strings.xml b/addons/casa/app/src/main/res/values-es/strings.xml
+index b1bc7ca..5762798 100644
+--- a/addons/casa/app/src/main/res/values-es/strings.xml
++++ b/addons/casa/app/src/main/res/values-es/strings.xml
+@@ -31,4 +31,31 @@
+     <string name="gas_alarm_sub">El sensor de gas se ha activado · pulsa OK para cerrar</string>
+     <string name="gas_alarm_toast">Alarma de gas: el sensor de gas se ha activado</string>
+     <string name="gas_stopped_sub">La alarma se ha parado · pulsa OK para cerrar</string>
++
++    <!-- Home Assistant -->
++    <string name="ha_saved">Casa: Home Assistant configurado</string>
++    <string name="ha_failed">No se pudo hablar con Home Assistant</string>
++    <string name="ha_down">Casa: sin conexión con Home Assistant</string>
++    <string name="ha_down_sub">No llegarán el timbre ni los avisos de casa</string>
++    <string name="ha_token_refused">Home Assistant ha rechazado el token de Casa</string>
++    <string name="ha_token_refused_sub">Envía otro desde el PC: run.py casa enviar</string>
++
++    <!-- Timbre -->
++    <string name="doorbell_ringing">Llaman a %1$s</string>
++    <string name="doorbell_connecting">Conectando con la cámara…</string>
++    <string name="doorbell_no_video">Ahora no llega vídeo de esta cámara</string>
++    <string name="doorbell_no_camera">Este timbre no tiene cámara configurada</string>
++    <string name="doorbell_live">EN DIRECTO</string>
++    <string name="doorbell_close">Cerrar</string>
++    <string name="doorbell_open_lock">Abrir %1$s</string>
++    <string name="doorbell_open_gate">Abrir portal</string>
++    <string name="doorbell_opening">Abriendo…</string>
++    <string name="doorbell_opened">Abierto</string>
++    <string name="doorbell_open_failed">No se abrió</string>
++    <string name="doorbell_hint_open">Mantén OK para abrir · Atrás para cerrar</string>
++    <string name="doorbell_hint_no_ring">Sin llamada no se puede abrir · Atrás para cerrar</string>
++    <string name="doorbell_hint_close">Atrás para cerrar</string>
++    <string name="motion_title">Movimiento en %1$s</string>
++    <string name="motion_sub">Alguien se acerca</string>
++    <string name="no_doorbell">Casa: no hay ningún timbre configurado</string>
+ </resources>
+diff --git a/addons/casa/app/src/main/res/values/strings.xml b/addons/casa/app/src/main/res/values/strings.xml
+index 670a3d5..546f942 100644
+--- a/addons/casa/app/src/main/res/values/strings.xml
++++ b/addons/casa/app/src/main/res/values/strings.xml
+@@ -33,4 +33,31 @@
+     <string name="gas_alarm_sub">The gas sensor has gone off · press OK to close</string>
+     <string name="gas_alarm_toast">Gas alarm: the gas sensor has gone off</string>
+     <string name="gas_stopped_sub">The alarm has stopped · press OK to close</string>
++
++    <!-- Home Assistant -->
++    <string name="ha_saved">Casa: Home Assistant set up</string>
++    <string name="ha_failed">Couldn\'t reach Home Assistant</string>
++    <string name="ha_down">Casa: no connection to Home Assistant</string>
++    <string name="ha_down_sub">Doorbell and home alerts won\'t arrive</string>
++    <string name="ha_token_refused">Home Assistant refused Casa\'s token</string>
++    <string name="ha_token_refused_sub">Send a new one from the PC: run.py home send</string>
++
++    <!-- Doorbell -->
++    <string name="doorbell_ringing">Ringing at %1$s</string>
++    <string name="doorbell_connecting">Connecting to the camera…</string>
++    <string name="doorbell_no_video">No video from this camera right now</string>
++    <string name="doorbell_no_camera">This doorbell has no camera set up</string>
++    <string name="doorbell_live">LIVE</string>
++    <string name="doorbell_close">Close</string>
++    <string name="doorbell_open_lock">Open %1$s</string>
++    <string name="doorbell_open_gate">Open the gate</string>
++    <string name="doorbell_opening">Opening…</string>
++    <string name="doorbell_opened">Opened</string>
++    <string name="doorbell_open_failed">Didn\'t open</string>
++    <string name="doorbell_hint_open">Hold OK to open · Back to close</string>
++    <string name="doorbell_hint_no_ring">Opening needs someone to ring first · Back to close</string>
++    <string name="doorbell_hint_close">Back to close</string>
++    <string name="motion_title">Motion at %1$s</string>
++    <string name="motion_sub">Someone is coming</string>
++    <string name="no_doorbell">Casa: no doorbell set up</string>
+ </resources>
+-- 
+2.54.0.windows.1
+
