@@ -52,8 +52,8 @@ all CC BY-SA.
 - [WebRTC Android SDK](https://github.com/webrtc-sdk/android) (BSD 3-Clause), a build of Google's
   [libwebrtc](https://webrtc.googlesource.com/src/) (BSD 3-Clause): the doorbell card's live video.
 - [Eclipse Paho MQTT client](https://github.com/eclipse/paho.mqtt.java) (EPL 2.0 / EDL 1.0): Tuya's cloud messages.
-- The doorbell card's corner card, its hold-to-act ring and the lesson about a second video next to a playing one come
-  from cleanyourtv's **Frigate Glance** add-on by @nickld (MIT), itself after [Peek](https://github.com/casi-3/peek).
+- The doorbell card's hold-to-act ring and the lesson about a second video next to a playing one come from
+  cleanyourtv's **Frigate Glance** add-on by @nickld (MIT), itself after [Peek](https://github.com/casi-3/peek).
   Home Assistant's WebSocket and WebRTC messages follow [Home Assistant](https://github.com/home-assistant/core)'s
   code and developer docs (Apache 2.0).
 

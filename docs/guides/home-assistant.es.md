@@ -123,7 +123,7 @@ flowchart LR
 | Clave | Qué es |
 |---|---|
 | `roles` | `luz` y `calefactor`: un `light`, `switch`, `fan` o `input_boolean`. `temperatura`, `humedad`: un `sensor`. `puerta`, `gas`: un `binary_sensor`. Todos opcionales. |
-| `timbres` | Hasta 4 timbres. `nombre` es lo que dice la ventana; `llamada` es el evento del timbre (obligatorio); `movimiento`, un evento o un `binary_sensor` de movimiento; `camara`, una cámara con vídeo en directo; `abrir`, hasta 3 `button` (se pulsan) o `lock` (abren el resbalón si pueden; si no, desbloquean). |
+| `timbres` | Hasta 4 timbres. `nombre` es lo que dice la ventana; `llamada` es el evento del timbre (obligatorio); `movimiento`, un evento o un `binary_sensor` de movimiento; `camara`, una cámara con vídeo en directo; `abrir`, hasta 3 `button` (se pulsan) o `lock` (abren el resbalón si pueden; si no, desbloquean). En la ventana salen como *Abrir portal* (un `button`, como el de Ring Intercom, o lo que tenga en su id o su nombre portal, portero, telefonillo, gate, intercom u opener, como un Nuki Opener) o *Abrir puerta* (lo demás); si hay dos del mismo tipo, cada uno con su nombre de Home Assistant. |
 | `aviso_movimiento` | `aviso` (aviso pequeño, por defecto), `video` (la ventana sin sonido 20 s, nunca encima de un vídeo que suena) o `no`. |
 | `abrir_tras_llamada_s` | Cuánto tiempo después de una llamada se puede abrir desde la ventana (de 30 a 600 s, 180 por defecto). |
 | `pausar` | Pausar lo que sonaba mientras está la ventana (`true` por defecto). |
@@ -132,13 +132,14 @@ flowchart LR
 
 | En el mando | Qué hace |
 |---|---|
-| ◀ ▶ | Pasa de un botón a otro |
+| ▲ ▼ (o ◀ ▶) | Pasa de un botón a otro |
 | **OK mantenido 1,5 s** | Abre: un anillo verde se llena alrededor del botón; si sueltas antes no pasa nada. Después el botón dice *Abierto* o *No se abrió*. |
 | OK en *Cerrar*, o Atrás | Cierra la ventana |
 
 La ventana se cierra sola 90 segundos después de la última llamada o pulsación. Mientras está, el mando maneja la
-ventana, no la app de debajo. Su forma (en una esquina, en el centro o en columna) se elige en una
-[maqueta](https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV); la de la esquina es la que está hecha.
+ventana, no la app de debajo. Es una columna en el tercio derecho de la pantalla, de arriba abajo: el vídeo, los
+botones en lista y la ayuda al pie. Se eligió entre tres formas en una
+[maqueta](https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV); la forma vive solo en `TimbreCard.java`.
 
 ## Probarlo sin timbre
 

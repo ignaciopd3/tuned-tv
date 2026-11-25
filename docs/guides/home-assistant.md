@@ -120,7 +120,7 @@ flowchart LR
 | Key | What it is |
 |---|---|
 | `roles` | `luz` and `calefactor`: a `light`, `switch`, `fan` or `input_boolean`. `temperatura`, `humedad`: a `sensor`. `puerta`, `gas`: a `binary_sensor`. All optional. |
-| `timbres` | Up to 4 doorbells. `nombre` is what the card says; `llamada` is the doorbell's event (required); `movimiento` an event or a motion `binary_sensor`; `camara` a camera with live video; `abrir` up to 3 `button` (pressed) or `lock` (unlatched if it can, otherwise unlocked). |
+| `timbres` | Up to 4 doorbells. `nombre` is what the card says; `llamada` is the doorbell's event (required); `movimiento` an event or a motion `binary_sensor`; `camara` a camera with live video; `abrir` up to 3 `button` (pressed) or `lock` (unlatched if it can, otherwise unlocked). The card names them *Open the gate* (a `button`, such as Ring Intercom's, or one whose id or name says gate, intercom, opener, portal, portero or telefonillo, such as a Nuki Opener) or *Open the door* (the rest); two of the same kind go by their Home Assistant names. |
 | `aviso_movimiento` | `aviso` (small message, the default), `video` (the muted card for 20 s, never over a playing video) or `no`. |
 | `abrir_tras_llamada_s` | How long after a ring the card may open (30 to 600 s, 180 by default). |
 | `pausar` | Pause what was playing while the card shows (`true` by default). |
@@ -131,13 +131,14 @@ The keys are in Spanish, like the rest of Casa's settings.
 
 | On the remote | What it does |
 |---|---|
-| ◀ ▶ | Move between the buttons |
+| ▲ ▼ (or ◀ ▶) | Move between the buttons |
 | **OK held 1.5 s** | Open: a green ring fills around the button; letting go earlier does nothing. The button then says *Opened* or *Didn't open*. |
 | OK on *Close*, or Back | Close the card |
 
 The card closes by itself 90 seconds after the last ring or key press. While it shows, the remote works the card,
-not the app underneath. Its shape (a corner, the centre, or a column) is chosen in a
-[mockup](https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV); the corner is the one built.
+not the app underneath. It is a column down the right third of the screen: the video, the buttons in a list and the
+hint at the bottom. It was chosen from three shapes in a [mockup](https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV);
+the shape lives only in `TimbreCard.java`.
 
 ## Try it without a doorbell
 

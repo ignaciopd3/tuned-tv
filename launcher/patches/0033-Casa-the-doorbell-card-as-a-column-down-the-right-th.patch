@@ -1,0 +1,399 @@
+From 5c45f1b7ac835a19cca7f961e4aa187fe9cc91b9 Mon Sep 17 00:00:00 2001
+From: ignaciopd3 <210892957+ignaciopd3@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 20:17:00 +0100
+Subject: [PATCH 33/33] Casa: the doorbell card as a column down the right
+ third, and openers named gate or door
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The shape chosen in the mockup (option 3): a strip of 320 of 960 dp from top to bottom, the
+video, the openers and Close in a list (▲ ▼ or ◀ ▶), and the hint at the bottom. Three text
+buttons no longer squeeze into a third of the screen.
+
+Each opener reads "Open the gate" (a button such as Ring Intercom's, or anything whose id or
+name says gate, intercom, opener, portal…; a Nuki Opener is a lock) or "Open the door"; two of
+one kind on a doorbell go by their Home Assistant names.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../github/ignaciopd3/casa/CasaService.java   | 14 +--
+ .../java/io/github/ignaciopd3/casa/Ha.java    | 30 +++++++
+ .../io/github/ignaciopd3/casa/TimbreCard.java | 88 ++++++++++---------
+ .../github/ignaciopd3/casa/TimbreService.java |  3 +-
+ .../app/src/main/res/values-es/strings.xml    |  3 +-
+ .../casa/app/src/main/res/values/strings.xml  |  3 +-
+ .../io/github/ignaciopd3/casa/HaTest.java     | 23 +++++
+ 7 files changed, 113 insertions(+), 51 deletions(-)
+
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+index cb9b158..181482c 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/CasaService.java
+@@ -285,7 +285,7 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         });
+     }
+ 
+-    /** What TimbreService needs for one doorbell's card; the openers are named as Home Assistant names them. */
++    /** What TimbreService needs for one doorbell's card; each opener is "the gate" or "the door" by what it is. */
+     private Bundle card(int i, long ringAt, String kind) {
+         HaConfig c = ha;
+         HaConfig.Doorbell d = c.doorbells.get(i);
+@@ -297,19 +297,21 @@ public class CasaService extends Service implements MqttWatch.Listener, GasWatch
+         b.putInt(TimbreService.OPEN_WINDOW_S, c.openWindowS);
+         b.putBoolean(TimbreService.PAUSE, c.pause);
+         int n = d.open.size();
+-        String[] ids = new String[n], labels = new String[n], services = new String[n];
++        String[] ids = new String[n], names = new String[n], services = new String[n];
++        boolean[] gate = new boolean[n];
+         for (int k = 0; k < n; k++) {
+             String e = d.open.get(k);
+             JSONObject a = haAttrs.get(e);
+-            String name = a == null ? null : a.optString("friendly_name", null);
+             String[] svc = Ha.openService(e, Ha.lockCanOpen(a));
+             ids[k] = e;
+             services[k] = svc[0] + "/" + svc[1];
+-            labels[k] = e.startsWith("lock.") ? getString(R.string.doorbell_open_lock, name != null ? name : d.name)
+-                    : name != null ? name : getString(R.string.doorbell_open_gate);
++            gate[k] = Ha.opensGate(e, a);
++            names[k] = Ha.friendlyName(e, a);
+         }
+         b.putStringArray(TimbreService.OPEN_IDS, ids);
+-        b.putStringArray(TimbreService.OPEN_LABELS, labels);
++        b.putStringArray(TimbreService.OPEN_LABELS, Ha.openLabels(gate, names, getString(R.string.doorbell_open_gate),
++                getString(R.string.doorbell_open_door), getString(R.string.doorbell_open_named)));
++        b.putBooleanArray(TimbreService.OPEN_GATE, gate);
+         b.putStringArray(TimbreService.OPEN_SERVICES, services);
+         return b;
+     }
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
+index 7e7a08a..8515cf5 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/Ha.java
+@@ -4,6 +4,7 @@ import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.Locale;
+ import java.util.Map;
+ import org.json.JSONArray;
+ import org.json.JSONException;
+@@ -17,6 +18,9 @@ import org.json.JSONObject;
+ final class Ha {
+     /** LockEntityFeature.OPEN: the lock can unlatch, not just unlock. */
+     private static final int LOCK_OPEN = 1;
++    /** Words in an opener's id or name that make it the building's door, not the home's (a Nuki Opener is a lock). */
++    private static final String[] GATE_WORDS = {"gate", "intercom", "opener", "building", "portal", "portero", "telefonillo",
++            "cancela", "verja", "edificio"};
+ 
+     private Ha() {
+     }
+@@ -79,6 +83,32 @@ final class Ha {
+         return attributes != null && (attributes.optInt("supported_features", 0) & LOCK_OPEN) != 0;
+     }
+ 
++    /** True when this opener is the building's door: a button (Ring Intercom's) or one whose id or name says so. */
++    static boolean opensGate(String entityId, JSONObject attributes) {
++        if (entityId.startsWith("button.")) return true;
++        String said = (entityId + " " + friendlyName(entityId, attributes)).toLowerCase(Locale.ROOT);
++        for (String w : GATE_WORDS) if (said.contains(w)) return true;
++        return false;
++    }
++
++    /** What Home Assistant calls the entity, or its id without the domain. */
++    static String friendlyName(String entityId, JSONObject attributes) {
++        String name = attributes == null ? "" : attributes.optString("friendly_name", "");
++        return name.isEmpty() ? entityId.substring(entityId.indexOf('.') + 1).replace('_', ' ') : name;
++    }
++
++    /** The open buttons' texts: the gate or the door by kind; two of one kind on a doorbell go by their names. */
++    static String[] openLabels(boolean[] gate, String[] names, String gateText, String doorText, String namedFormat) {
++        int gates = 0;
++        for (boolean g : gate) if (g) gates++;
++        String[] out = new String[gate.length];
++        for (int i = 0; i < gate.length; i++) {
++            boolean shared = gate[i] ? gates > 1 : gate.length - gates > 1;
++            out[i] = shared ? String.format(namedFormat, names[i]) : gate[i] ? gateText : doorText;
++        }
++        return out;
++    }
++
+     // ---- entity states ----
+ 
+     /** One entity as Casa keeps it: its state and its attributes, updated in place by apply(). */
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
+index 3e1e00c..3cbec8c 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreCard.java
+@@ -10,7 +10,10 @@ import android.graphics.PathMeasure;
+ import android.graphics.PixelFormat;
+ import android.graphics.RectF;
+ import android.graphics.Typeface;
++import android.graphics.drawable.ColorDrawable;
++import android.graphics.drawable.Drawable;
+ import android.graphics.drawable.GradientDrawable;
++import android.graphics.drawable.LayerDrawable;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Looper;
+@@ -33,11 +36,11 @@ import java.util.List;
+ import org.webrtc.SurfaceViewRenderer;
+ 
+ /**
+- * The doorbell card on screen, in the shape the owner picks from the mockup (https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV):
+- * this is option 1, "Esquina", a third of the screen at the bottom right, and the only class that knows the shape.
+- * Dark glass like Casa's other messages: a header with the doorbell's name and the time, the live video, one button per
+- * opener plus Close, and a hint. It takes the remote while it shows (◀ ▶ move, OK held 1.5 s opens, Back closes), except
+- * for motion with video, which never takes it.
++ * The doorbell card on screen, in the shape chosen from the mockup (https://claude.ai/artifact/GP9bgvq1UGGJRu6Bw13XPV):
++ * option 3, "Columna", a strip down the right third of the screen (320 of 960 dp), and the only class that knows the
++ * shape. Dark glass like Casa's other messages: a header with the doorbell's name and the time, the live video, a list
++ * with one button per opener plus Close, and the hint at the bottom. It takes the remote while it shows (▲ ▼ or ◀ ▶
++ * move, OK held 1.5 s opens, Back closes), except for motion with video, which never takes it.
+  */
+ final class TimbreCard {
+     interface Listener {
+@@ -49,7 +52,8 @@ final class TimbreCard {
+     }
+ 
+     private static final int GREEN = 0xFF30D158, RED = 0xFFFF453A, INK = 0xFFEEF1F6, GLASS = 0xD1080A10;
+-    private static final float WIDTH = 0.38f, MARGIN_X = 0.026f, MARGIN_Y = 0.04f;
++    private static final float WIDTH = 1 / 3f;
++    private static final int BUTTON_H = 44;
+ 
+     private final Context ctx;
+     private final WindowManager wm;
+@@ -102,22 +106,25 @@ final class TimbreCard {
+         int width = Math.round(m.widthPixels * WIDTH);
+         root = new LinearLayout(ctx);
+         root.setOrientation(LinearLayout.VERTICAL);
+-        GradientDrawable bg = new GradientDrawable();
+-        bg.setColor(GLASS);
+-        bg.setCornerRadius(px(22));
+-        bg.setStroke(Math.max(1, px(1)), 0x1FFFFFFF);
++        LayerDrawable bg = new LayerDrawable(new Drawable[] {new ColorDrawable(GLASS), new ColorDrawable(0x1FFFFFFF)});
++        bg.setLayerGravity(1, Gravity.START | Gravity.FILL_VERTICAL);   // a thin line on the side facing the picture
++        bg.setLayerWidth(1, Math.max(1, px(1)));
+         root.setBackground(bg);
+-        int pad = px(14);
+-        root.setPadding(pad, pad, pad, pad);
++        int padX = px(24), padY = px(28);
++        root.setPadding(padX, padY, padX, padY);
+ 
+         root.addView(header(now));
+-        int videoW = width - 2 * pad;
++        int videoW = width - 2 * padX;
+         FrameLayout videoBox = new FrameLayout(ctx);
+         videoBox.setBackgroundColor(0xFF1B222B);
+         renderer = new SurfaceViewRenderer(ctx);
+         renderer.setZOrderMediaOverlay(true);
+         videoBox.addView(renderer, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+         status = text(ctx.getString(R.string.doorbell_connecting), 13, 0xBFFFFFFF, false);
++        status.setSingleLine(false);
++        status.setMaxLines(2);
++        status.setGravity(Gravity.CENTER);
++        status.setPadding(px(10), 0, px(10), 0);
+         videoBox.addView(status, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+         badge = text(ctx.getString(R.string.doorbell_live), 11, Color.WHITE, true);
+         GradientDrawable red = new GradientDrawable();
+@@ -130,33 +137,31 @@ final class TimbreCard {
+         blp.setMargins(px(8), px(8), 0, 0);
+         videoBox.addView(badge, blp);
+         LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(videoW, videoW * 9 / 16);
+-        vlp.topMargin = px(10);
++        vlp.topMargin = px(14);
+         root.addView(videoBox, vlp);
+ 
+-        LinearLayout row = new LinearLayout(ctx);
+-        row.setOrientation(LinearLayout.HORIZONTAL);
++        LinearLayout list = new LinearLayout(ctx);
++        list.setOrientation(LinearLayout.VERTICAL);
+         String[] labels = card.getStringArray(TimbreService.OPEN_LABELS);
+-        String[] ids = card.getStringArray(TimbreService.OPEN_IDS);
++        boolean[] gate = card.getBooleanArray(TimbreService.OPEN_GATE);
+         for (int i = 0; labels != null && i < labels.length; i++) {
+-            buttons.add(button(labels[i], ids[i].startsWith("lock.") ? R.drawable.ic_key : R.drawable.ic_portal, row));
++            buttons.add(button(labels[i], gate != null && gate[i] ? R.drawable.ic_portal : R.drawable.ic_key, list));
+         }
+-        buttons.add(button(ctx.getString(R.string.doorbell_close), R.drawable.ic_close, row));
+-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+-        rlp.topMargin = px(10);
+-        root.addView(row, rlp);
++        buttons.add(button(ctx.getString(R.string.doorbell_close), R.drawable.ic_close, list));
++        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
++        llp.topMargin = px(14);
++        root.addView(list, llp);
++        root.addView(new View(ctx), new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));   // hint at the bottom
+         hint = text("", 12, 0xFF98A1B0, false);
+-        hint.setGravity(Gravity.CENTER_HORIZONTAL);
+-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+-        hlp.topMargin = px(8);
+-        root.addView(hint, hlp);
++        hint.setSingleLine(false);
++        hint.setMaxLines(2);
++        root.addView(hint, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+ 
+         int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+         if (!takesRemote) flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(width, WindowManager.LayoutParams.WRAP_CONTENT,
++        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(width, WindowManager.LayoutParams.MATCH_PARENT,
+                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, flags, PixelFormat.TRANSLUCENT);
+-        lp.gravity = Gravity.BOTTOM | Gravity.END;
+-        lp.x = Math.round(m.widthPixels * MARGIN_X);
+-        lp.y = Math.round(m.heightPixels * MARGIN_Y);
++        lp.gravity = Gravity.TOP | Gravity.END;
+         if (takesRemote) {
+             root.setFocusable(true);
+             root.setFocusableInTouchMode(true);
+@@ -226,11 +231,13 @@ final class TimbreCard {
+     private boolean key(int code, KeyEvent ev) {
+         boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
+         switch (code) {
++            case KeyEvent.KEYCODE_DPAD_UP:
++            case KeyEvent.KEYCODE_DPAD_DOWN:
+             case KeyEvent.KEYCODE_DPAD_LEFT:
+             case KeyEvent.KEYCODE_DPAD_RIGHT:
+                 if (down) {
+                     cancelHold();
+-                    move(code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1);
++                    move(code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1);
+                     listener.onKey();
+                 }
+                 return true;
+@@ -252,9 +259,6 @@ final class TimbreCard {
+             case KeyEvent.KEYCODE_BACK:
+                 if (!down) listener.onClose();
+                 return true;
+-            case KeyEvent.KEYCODE_DPAD_UP:
+-            case KeyEvent.KEYCODE_DPAD_DOWN:
+-                return true;   // nothing above or below; keep them from the app underneath
+             default:
+                 return false;
+         }
+@@ -324,11 +328,11 @@ final class TimbreCard {
+         return DateFormat.getTimeFormat(ctx).format(new Date(now));
+     }
+ 
+-    private HoldButton button(String label, int icon, LinearLayout row) {
++    private HoldButton button(String label, int icon, LinearLayout list) {
+         HoldButton b = new HoldButton(ctx, label, icon == 0 ? null : ctx.getDrawable(icon));
+-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, px(40), 1);
+-        if (row.getChildCount() > 0) lp.setMarginStart(px(8));
+-        row.addView(b, lp);
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(BUTTON_H));
++        if (list.getChildCount() > 0) lp.topMargin = px(8);
++        list.addView(b, lp);
+         return b;
+     }
+ 
+@@ -360,11 +364,11 @@ final class TimbreCard {
+             super(c);
+             this.label = label;
+             setText(label);
+-            setTextSize(14);
+-            setGravity(Gravity.CENTER);
++            setTextSize(15);
++            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+             setSingleLine(true);
+             setEllipsize(android.text.TextUtils.TruncateAt.END);
+-            setPadding(px(10), 0, px(10), 0);
++            setPadding(px(18), 0, px(18), 0);
+             if (icon != null) {
+                 icon.setBounds(0, 0, px(16), px(16));
+                 setCompoundDrawablesRelative(icon, null, null, null);
+@@ -383,7 +387,7 @@ final class TimbreCard {
+ 
+         void paint(boolean focused) {
+             GradientDrawable bg = new GradientDrawable();
+-            bg.setCornerRadius(px(20));
++            bg.setCornerRadius(px(BUTTON_H / 2f));
+             int fill = result != 0 ? result : focused ? INK : 0x14FFFFFF;
+             int ink = result == GREEN ? 0xFF06210F : focused && result == 0 ? 0xFF0B0D12 : Color.WHITE;
+             bg.setColor(fill);
+diff --git a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
+index cdbd97f..19e4633 100644
+--- a/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
++++ b/addons/casa/app/src/main/java/io/github/ignaciopd3/casa/TimbreService.java
+@@ -26,7 +26,8 @@ import java.util.concurrent.Executors;
+  */
+ public class TimbreService extends Service implements TimbreCard.Listener, TimbreVideo.Listener {
+     static final String NAME = "name", CAMERA = "camera", KIND = "kind", RING_AT = "ring_at", OPEN_WINDOW_S = "open_window_s",
+-            PAUSE = "pause", OPEN_IDS = "open_ids", OPEN_LABELS = "open_labels", OPEN_SERVICES = "open_services";
++            PAUSE = "pause", OPEN_IDS = "open_ids", OPEN_LABELS = "open_labels", OPEN_GATE = "open_gate",
++            OPEN_SERVICES = "open_services";
+ 
+     private final Handler main = new Handler(Looper.getMainLooper());
+     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+diff --git a/addons/casa/app/src/main/res/values-es/strings.xml b/addons/casa/app/src/main/res/values-es/strings.xml
+index 5762798..02067ea 100644
+--- a/addons/casa/app/src/main/res/values-es/strings.xml
++++ b/addons/casa/app/src/main/res/values-es/strings.xml
+@@ -47,8 +47,9 @@
+     <string name="doorbell_no_camera">Este timbre no tiene cámara configurada</string>
+     <string name="doorbell_live">EN DIRECTO</string>
+     <string name="doorbell_close">Cerrar</string>
+-    <string name="doorbell_open_lock">Abrir %1$s</string>
+     <string name="doorbell_open_gate">Abrir portal</string>
++    <string name="doorbell_open_door">Abrir puerta</string>
++    <string name="doorbell_open_named">Abrir %1$s</string>
+     <string name="doorbell_opening">Abriendo…</string>
+     <string name="doorbell_opened">Abierto</string>
+     <string name="doorbell_open_failed">No se abrió</string>
+diff --git a/addons/casa/app/src/main/res/values/strings.xml b/addons/casa/app/src/main/res/values/strings.xml
+index 546f942..2aed656 100644
+--- a/addons/casa/app/src/main/res/values/strings.xml
++++ b/addons/casa/app/src/main/res/values/strings.xml
+@@ -49,8 +49,9 @@
+     <string name="doorbell_no_camera">This doorbell has no camera set up</string>
+     <string name="doorbell_live">LIVE</string>
+     <string name="doorbell_close">Close</string>
+-    <string name="doorbell_open_lock">Open %1$s</string>
+     <string name="doorbell_open_gate">Open the gate</string>
++    <string name="doorbell_open_door">Open the door</string>
++    <string name="doorbell_open_named">Open %1$s</string>
+     <string name="doorbell_opening">Opening…</string>
+     <string name="doorbell_opened">Opened</string>
+     <string name="doorbell_open_failed">Didn\'t open</string>
+diff --git a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
+index fd24130..484a304 100644
+--- a/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
++++ b/addons/casa/app/src/test/java/io/github/ignaciopd3/casa/HaTest.java
+@@ -1,5 +1,6 @@
+ package io.github.ignaciopd3.casa;
+ 
++import static org.junit.Assert.assertArrayEquals;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertNull;
+@@ -45,6 +46,28 @@ public class HaTest {
+         assertEquals("homeassistant/toggle", String.join("/", Ha.toggleService()));
+     }
+ 
++    @Test
++    public void anOpenerIsTheGateOrTheHomeDoorByWhatItIs() throws Exception {
++        assertTrue(Ha.opensGate("button.portal_open_door", null));                       // Ring Intercom
++        assertTrue(Ha.opensGate("lock.nuki_opener", null));                              // Nuki Opener, a lock
++        assertTrue(Ha.opensGate("lock.a1b2", new JSONObject("{\"friendly_name\":\"Portero del edificio\"}")));
++        assertTrue(Ha.opensGate("lock.x", new JSONObject("{\"friendly_name\":\"Building Intercom\"}")));
++        assertFalse(Ha.opensGate("lock.front_door", new JSONObject("{\"friendly_name\":\"Front door\"}")));
++        assertFalse(Ha.opensGate("lock.puerta_casa", null));
++    }
++
++    @Test
++    public void openersGoByKindAndByNameWhenTwoShareOne() throws Exception {
++        assertEquals("Nuki casa", Ha.friendlyName("lock.x", new JSONObject("{\"friendly_name\":\"Nuki casa\"}")));
++        assertEquals("puerta garaje", Ha.friendlyName("lock.puerta_garaje", null));
++        assertArrayEquals(new String[] {"Abrir portal", "Abrir puerta"},
++                Ha.openLabels(new boolean[] {true, false}, new String[] {"Telefonillo Abrir puerta", "Nuki"},
++                        "Abrir portal", "Abrir puerta", "Abrir %1$s"));
++        assertArrayEquals(new String[] {"Abrir Puerta", "Abrir Garaje", "Abrir portal"},
++                Ha.openLabels(new boolean[] {false, false, true}, new String[] {"Puerta", "Garaje", "Portal"},
++                        "Abrir portal", "Abrir puerta", "Abrir %1$s"));
++    }
++
+     @Test
+     public void lockOpenIsSupportedWhenTheFeatureBitIsSet() throws Exception {
+         assertTrue(Ha.lockCanOpen(new JSONObject("{\"supported_features\":1}")));
+-- 
+2.54.0.windows.1
+
