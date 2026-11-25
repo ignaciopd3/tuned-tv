@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -205,6 +207,11 @@ def test_first_real_change_measures_before_and_results_md(engine: Engine, fake_t
     assert jsons[0].stem <= fake_tv.last_run().name  # antes del cambio
     assert engine("--action", "all").returncode == 0
     assert len(list(medidas.glob("*.json"))) == 1  # solo la primera vez
+    # Las fechas van al segundo, y la tele simulada es tan rápida que la medida podría caer en el mismo segundo que el
+    # cambio; en una tele real aplicar y comprobar tarda varios. Se espera a que pase ese segundo, como en la realidad.
+    last_change = max(r.name[:15] for r in fake_tv.runs() if (r / "rollback.sh").is_file())
+    while datetime.now().strftime("%Y%m%d-%H%M%S") <= last_change:
+        time.sleep(0.05)
     assert cli.main(["medir", "--perfil", "test"]) == 0  # la de después, a mano
     assert cli.main(["resultados", "--perfil", "test"]) == 0
     text = (fake_tv.profile / "results.md").read_text(encoding="utf-8")
